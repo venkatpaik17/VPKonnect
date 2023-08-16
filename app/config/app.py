@@ -17,6 +17,12 @@ class AppSettings(BaseAppSettings):
     version: str = "0.1.0"
     api_v0_prefix: str = "/api/v0"
 
+    database_name: str
+    database_username: str
+    database_hostname: str
+    database_port: str
+    database_password: str
+
     allowed_cors_origin: str | list[AnyHttpUrl]
 
     # validator for parsing list of cors origins
