@@ -4,7 +4,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from app.config.app import settings
 
 # use env variables
-SQLALCHEMY_DATABASE_URL = f"postgresql://{settings.database_username}:{settings.database_password}@{settings.database_hostname}:{settings.database_port}/{settings.database_hostname}"
+SQLALCHEMY_DATABASE_URL = f"postgresql://{settings.database_username}:{settings.database_password}@{settings.database_hostname}:{settings.database_port}/{settings.database_name}"
 
 # engine is responsible for sqlalchemy to connect to a DB
 engine = create_engine(SQLALCHEMY_DATABASE_URL)

@@ -9,6 +9,8 @@ from app.db import db_sqlalchemy
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# set db url by modifying sqlalchemy.url parameter option in alembic.ini
 config.set_main_option(
     "sqlalchemy.url",
     f"postgresql://{settings.database_username}:{settings.database_password}@{settings.database_hostname}:{settings.database_port}/{settings.database_name}",
