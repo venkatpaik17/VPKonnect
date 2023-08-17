@@ -1,13 +1,18 @@
-import ulid
-from sqlalchemy import Column, String, func, insert, select
+from sqlalchemy import (
+    TIMESTAMP,
+    Boolean,
+    Column,
+    Date,
+    Integer,
+    LargeBinary,
+    String,
+    func,
+    text,
+    update,
+)
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.db_sqlalchemy import Base, engine
-
-
-# function to generate ulid and return as uuid (used ulid-py package)
-def get_ulid():
-    return ulid.new().uuid
 
 
 # this is user orm model to create user table, here id is ulid generated db/server side using function and stored as uuid in the table.
@@ -16,23 +21,33 @@ class User(Base):
     id = Column(
         UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
     )
-    name = Column(String(length=50), nullable=False)
+    first_name = Column(String(length=50), nullable=False)
+    last_name = Column(String(length=50), nullable=False)
+    username = Column(String(length=320), nullable=False, unique=True)
+    password = Column(String(length=65), nullable=False)
+    email = Column(String(length=320), nullable=False, unique=True)
+    date_of_birth = Column(Date, nullable=False)
+    age = Column(Integer, nullable=False)
+
+    # length param is just a hint for db schema, not a enforced restriction
+    profile_picture = Column(LargeBinary(length=3072), nullable=True)
+    gender = Column(String(length=1), nullable=False)
+    bio = Column(String(length=150), nullable=True)
+    country = Column(String(length=3), nullable=True)
+    account_visibility = Column(
+        String(length=20), nullable=False, server_default=text("'public'")
+    )
+    status = Column(String(length=20), nullable=False, server_default=text("'active'"))
+    type = Column(String(length=20), nullable=False, server_default=text("'standard'"))
+    is_deleted = Column(Boolean, nullable=False, server_default="False")
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
 
 
-# inserting a entry, id will be default generated
-stmt = insert(User).values(name="vpk")
-
-# connection and execution
+# testing onupdate for updated_at column
+stmt = update(User).where(User.first_name == "vpk").values(gender="F")
 with engine.connect() as conn:
     result = conn.execute(stmt)
     conn.commit()
-
-# getting all users from user table
-stmt = select(User)
-with engine.connect() as conn:
-    result = conn.execute(stmt).all()
-
-    # getting the uuid from first entry
-    print(result[0][0])
-    # getting all rows
-    print(result)
