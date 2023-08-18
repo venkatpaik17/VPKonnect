@@ -3,19 +3,19 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
+    ForeignKey,
     Integer,
     LargeBinary,
     String,
     func,
     text,
-    update,
 )
 from sqlalchemy.dialects.postgresql import UUID
 
-from app.db.db_sqlalchemy import Base, engine
+from app.db.db_sqlalchemy import Base
 
 
-# this is user orm model to create user table, here id is ulid generated db/server side using function and stored as uuid in the table.
+# user orm model to create user table, here id is ulid generated db/server side using function and stored as uuid in the table.
 class User(Base):
     __tablename__ = "user"
     id = Column(
@@ -29,8 +29,8 @@ class User(Base):
     date_of_birth = Column(Date, nullable=False)
     age = Column(Integer, nullable=False)
 
-    # length param is just a hint for db schema, not a enforced restriction
-    profile_picture = Column(LargeBinary(length=3072), nullable=True)
+    # length param is just a hint for db schema, not a enforced restriction, 3MiB is limit
+    profile_picture = Column(LargeBinary(length=3145728), nullable=True)
     gender = Column(String(length=1), nullable=False)
     bio = Column(String(length=150), nullable=True)
     country = Column(String(length=3), nullable=True)
@@ -46,8 +46,63 @@ class User(Base):
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
 
 
-# testing onupdate for updated_at column
-stmt = update(User).where(User.first_name == "vpk").values(gender="F")
-with engine.connect() as conn:
-    result = conn.execute(stmt)
-    conn.commit()
+# orm model for username change history table. previous usernames are saved.
+class UsernameChangeHistory(Base):
+    __tablename__ = "username_change_history"
+    id = Column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
+    )
+    previous_username = Column(String(length=30), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+
+
+# orm model for password change history table. previous passwords are not saved.
+class PasswordChangeHistory(Base):
+    __tablename__ = "password_change_history"
+    id = Column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
+    )
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+
+
+# orm model for user follow association table. Keeps track of user's followers and following
+class UserFollow(Base):
+    __tablename__ = "user_follow_association"
+    status = Column(String(length=20), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+    follower_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
+    )
+    followed_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+# orm model for user session table. Keeps track of user's sessions
+class UserSession(Base):
+    __tablename__ = "user_session"
+    id = Column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
+    )
+    device_info = Column(String, nullable=False)
+    refresh_token_id = Column(String, nullable=False)
+    status = Column(String(length=20), nullable=False, server_default=text("'active'"))
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )

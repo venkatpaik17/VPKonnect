@@ -2,8 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.app import settings
-from app.db.db_sqlalchemy import engine
-from app.models import user
+from app.db.db_sqlalchemy import Base, engine
+from app.models import admin, comment, post, user
 
 ENVIRONMENT = settings.app_environment
 SHOW_DOCS_ENVIRONMENT = ("dev", "test")
@@ -13,8 +13,9 @@ if ENVIRONMENT not in SHOW_DOCS_ENVIRONMENT:
     settings.docs_url = None
     settings.redoc_url = None
 
-# connection is established and user model tables are created, only needed if using sqlalchemy for create operations. Not required if using alembic (DB Migr tool)
-user.Base.metadata.create_all(bind=engine)
+# connection is established and model tables are created, only needed if using sqlalchemy for create operations. Not required if using alembic (DB Migr tool)
+# all the models are imported and Base instance is used
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(**settings.fastapi_kwargs)
 
