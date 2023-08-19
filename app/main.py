@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.app import settings
 from app.db.db_sqlalchemy import Base, engine
-from app.models import admin, comment, post, user
+from app.models import admin, auth, comment, post, user
 
 ENVIRONMENT = settings.app_environment
 SHOW_DOCS_ENVIRONMENT = ("dev", "test")

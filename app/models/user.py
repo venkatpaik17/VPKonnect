@@ -15,6 +15,21 @@ from sqlalchemy.dialects.postgresql import UUID
 from app.db.db_sqlalchemy import Base
 
 
+# orm model for user follow association table. Keeps track of user's followers and following
+class UserFollowAssociation(Base):
+    __tablename__ = "user_follow_association"
+    status = Column(String(length=20), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+    follower_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
+    )
+    followed_user_id = Column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
 # user orm model to create user table, here id is ulid generated db/server side using function and stored as uuid in the table.
 class User(Base):
     __tablename__ = "user"
@@ -75,21 +90,6 @@ class PasswordChangeHistory(Base):
     )
 
 
-# orm model for user follow association table. Keeps track of user's followers and following
-class UserFollow(Base):
-    __tablename__ = "user_follow_association"
-    status = Column(String(length=20), nullable=False)
-    created_at = Column(
-        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
-    )
-    follower_user_id = Column(
-        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
-    )
-    followed_user_id = Column(
-        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
-    )
-
-
 # orm model for user session table. Keeps track of user's sessions
 class UserSession(Base):
     __tablename__ = "user_session"
@@ -97,12 +97,11 @@ class UserSession(Base):
         UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
     )
     device_info = Column(String, nullable=False)
-    refresh_token_id = Column(String, nullable=False)
-    status = Column(String(length=20), nullable=False, server_default=text("'active'"))
-    created_at = Column(
+    login_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
     )
-    updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
+    logout_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
+    is_active = Column(Boolean, nullable=False, server_default=text("True"))
