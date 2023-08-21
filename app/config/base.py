@@ -1,6 +1,6 @@
 from enum import Enum
 
-from pydantic.v1 import BaseSettings
+from pydantic import BaseSettings
 
 
 class AppEnvTypes(str, Enum):

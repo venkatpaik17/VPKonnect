@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.db_sqlalchemy import Base
+from app.models import comment
 
 
 # orm model for user follow association table. Keeps track of user's followers and following
@@ -78,7 +79,7 @@ class User(Base):
         back_populates="follower",
         primaryjoin=id == UserFollowAssociation.follower_user_id,
     )
-    usernames = relationship("UsernameChanegHistory", back_populates="username_user")
+    usernames = relationship("UsernameChangeHistory", back_populates="username_user")
     passwords = relationship("PasswordChangeHistory", back_populates="password_user")
     sessions = relationship("UserSession", back_populates="session_user")
     posts = relationship("Post", back_populates="post_user")

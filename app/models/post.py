@@ -59,8 +59,10 @@ class PostLike(Base):
     post_id = Column(
         UUID(as_uuid=True), ForeignKey("post.id", ondelete="CASCADE"), primary_key=True
     )
-    post_like_user = relationship("User", back_populates="post_likes")
-    like_post = relationship("Post", back_populates="likes")
+    post_like_user = relationship(
+        "User", back_populates="post_likes", foreign_keys=[user_id]
+    )
+    like_post = relationship("Post", back_populates="likes", foreign_keys=[post_id])
 
 
 # orm model for post activity table.

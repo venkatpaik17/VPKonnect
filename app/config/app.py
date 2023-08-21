@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic.v1 import AnyHttpUrl, validator
+from pydantic import AnyHttpUrl, validator
 
 from app.config.base import BaseAppSettings
 

@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v0 import api_routes
 from app.config.app import settings
 from app.db.db_sqlalchemy import Base, engine
 from app.models import admin, auth, comment, post, user
@@ -26,6 +27,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(api_routes.router)
 
 
 @app.get("/")
