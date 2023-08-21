@@ -9,6 +9,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from app.db.db_sqlalchemy import Base
 
@@ -34,6 +35,10 @@ class Comment(Base):
     post_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
+    comment_user = relationship("User", back_populates="comments")
+    comment_post = relationship("Post", back_populates="comments")
+    likes = relationship("CommentLike", back_populates="like_comment")
+    activity = relationship("CommentActivity", back_populates="activity_comment")
 
 
 # orm model for comment liske table
@@ -57,6 +62,8 @@ class CommentLike(Base):
         ForeignKey("comment.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    comment_like_user = relationship("User", back_populates="comment_likes")
+    like_comment = relationship("Comment", back_populates="likes")
 
 
 # orm model for comment activity table.
@@ -69,3 +76,4 @@ class CommentActivity(Base):
     comment_id = Column(
         UUID(as_uuid=True), ForeignKey("comment.id", ondelete="CASCADE"), nullable=False
     )
+    activity_comment = relationship("Comment", back_populates="activity")

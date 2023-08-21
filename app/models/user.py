@@ -11,6 +11,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from app.db.db_sqlalchemy import Base
 
@@ -27,6 +28,12 @@ class UserFollowAssociation(Base):
     )
     followed_user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
+    )
+    follower = relationship(
+        "User", back_populates="following", foreign_keys=[follower_user_id]
+    )
+    followed = relationship(
+        "User", back_populates="followers", foreign_keys=[followed_user_id]
     )
 
 
@@ -60,6 +67,25 @@ class User(Base):
     )
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
 
+    followers = relationship(
+        "UserFollowAssociation",
+        back_populates="followed",
+        primaryjoin=id == UserFollowAssociation.followed_user_id,
+    )
+
+    following = relationship(
+        "UserFollowAssociation",
+        back_populates="follower",
+        primaryjoin=id == UserFollowAssociation.follower_user_id,
+    )
+    usernames = relationship("UsernameChanegHistory", back_populates="username_user")
+    passwords = relationship("PasswordChangeHistory", back_populates="password_user")
+    sessions = relationship("UserSession", back_populates="session_user")
+    posts = relationship("Post", back_populates="post_user")
+    post_likes = relationship("PostLike", back_populates="post_like_user")
+    comments = relationship("Comment", back_populates="comment_user")
+    comment_likes = relationship("CommentLike", back_populates="comment_like_user")
+
 
 # orm model for username change history table. previous usernames are saved.
 class UsernameChangeHistory(Base):
@@ -74,6 +100,7 @@ class UsernameChangeHistory(Base):
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
+    username_user = relationship("User", back_populates="usernames")
 
 
 # orm model for password change history table. previous passwords are not saved.
@@ -88,6 +115,7 @@ class PasswordChangeHistory(Base):
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
+    password_user = relationship("User", back_populates="passwords")
 
 
 # orm model for user session table. Keeps track of user's sessions
@@ -105,3 +133,4 @@ class UserSession(Base):
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
     is_active = Column(Boolean, nullable=False, server_default=text("True"))
+    session_user = relationship("User", back_populates="sessions")
