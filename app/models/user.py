@@ -53,7 +53,10 @@ class User(Base):
     age = Column(Integer, nullable=False)
 
     # length param is just a hint for db schema, not a enforced restriction, 3MiB is limit
-    profile_picture = Column(LargeBinary(length=3145728), nullable=True)
+    # profile_picture = Column(LargeBinary(length=3145728), nullable=True)
+
+    # storing only filename
+    profile_picture = Column(String(), nullable=True)
     gender = Column(String(length=1), nullable=False)
     bio = Column(String(length=150), nullable=True)
     country = Column(String(length=3), nullable=True)

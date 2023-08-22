@@ -18,6 +18,7 @@ class UserRegister(UserBase):
 
 
 class UserRegisterResponse(UserBase):
+    profile_picture: str
     created_at: datetime
 
     class Config:

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v0 import api_routes
 from app.config.app import settings
@@ -19,6 +20,8 @@ if ENVIRONMENT not in SHOW_DOCS_ENVIRONMENT:
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(**settings.fastapi_kwargs)
+
+app.mount("/images", StaticFiles(directory="images"), name="images")
 
 app.add_middleware(
     CORSMiddleware,
