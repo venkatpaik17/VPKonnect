@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import user as user_model
 from app.schemas import user as user_schema
-from app.services.user import check_user_exists, check_username_exists
+from app.services import user as user_service
 from app.utils import image as image_utils
-from app.utils import password
+from app.utils import password as password_utils
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -24,19 +24,19 @@ def create_user(
     db: Session = Depends(get_db),
     image: UploadFile | None = None,
 ):
-    username_check = check_username_exists(request.username, db)
+    username_check = user_service.check_username_exists(request.username, db)
     if username_check:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Username {request.username} is already taken",
         )
-    user_check = check_user_exists(request.email, db)
+    user_check = user_service.check_user_exists(request.email, db)
     if user_check:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"{request.email} already exists in the system",
         )
-    hashed_password = password.get_hash(request.password)
+    hashed_password = password_utils.get_hash(request.password)
     request.password = hashed_password
 
     # image related code
@@ -59,6 +59,9 @@ def create_user(
             # Move to the end of the file, get image size, no need to read the file
             image.file.seek(0, 2)
             image_size = image.file.tell()
+
+            # move file pointer to the beginning of the file
+            image.file.seek(0)
             print(image_size)
 
             # if len(img_read) > MAX_SIZE: if image is read, we need to get the size using len()

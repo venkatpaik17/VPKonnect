@@ -23,6 +23,12 @@ class AppSettings(BaseAppSettings):
     database_port: str
     database_password: str
 
+    access_token_secret_key: str
+    refresh_token_secret_key: str
+    token_algorithm: str
+    access_token_expire_minutes: int
+    refresh_token_expire_minutes: int
+
     allowed_cors_origin: str | list[AnyHttpUrl]
 
     # validator for parsing list of cors origins
