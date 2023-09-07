@@ -77,6 +77,28 @@ def create_refresh_token(claims: dict):
     return encoded_jwt_rt, refresh_token_unique_id
 
 
+def decode_token_get_user(token: str):
+    claims = jwt.decode(
+        token,
+        ACCESS_TOKEN_SECRET_KEY,
+        algorithms=[ALGORITHM],
+        options={"verify_exp": False},
+    )
+    user_email = claims.get("sub")
+    return user_email if user_email else False
+
+
+def decode_token_get_token_id(token: str):
+    claims = jwt.decode(
+        token,
+        REFRESH_TOKEN_SECRET_KEY,
+        algorithms=[ALGORITHM],
+        options={"verify_exp": False},
+    )
+    token_id = claims.get("jti")
+    return token_id if token_id else False
+
+
 def verify_access_token(access_token: str):
     # decode the token
     try:

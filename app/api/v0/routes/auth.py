@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, status
+from fastapi import APIRouter, Cookie, Depends, Form, Header, HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.security.oauth2 import OAuth2PasswordRequestForm
@@ -70,7 +70,10 @@ def user_login(
     # encode to JSON, set refresh token cookie
     response = JSONResponse(content=jsonable_encoder(token_data))
     response.set_cookie(
-        key="refresh_token", value=user_refresh_token, httponly=True, secure=True
+        key="refresh_token",
+        value=user_refresh_token,
+        httponly=True,
+        secure=True,
     )
     # print(user_device_info)
 
@@ -101,18 +104,27 @@ def user_login(
 
 # token rotation route
 @router.post("/token/refresh")
-def refresh_token(refresh_token: str = Cookie(), db: Session = Depends(get_db)):
-    # check token blacklist
-    refresh_token_blacklist_check = auth_utils.is_token_blacklisted(refresh_token)
+def refresh_token(refresh_token: str = Cookie(None), db: Session = Depends(get_db)):
+    # check for refresh token in the request
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Refresh token required"
+        )
+
+    # verify refresh token. We verify first and then check blacklist, since we need jti
+    token_claims, token_verify = auth_utils.verify_refresh_token(refresh_token)
+    # print(token_verify)
+
+    # check token blacklist using jti
+    refresh_token_blacklist_check = auth_utils.is_token_blacklisted(
+        token_claims.token_id
+    )
     if refresh_token_blacklist_check:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Access Denied, Token invalid/revoked",
         )
 
-    # verify refresh token
-    token_claims, token_verify = auth_utils.verify_refresh_token(refresh_token)
-    print(token_verify)
     access_token_claims = {"sub": token_claims.email, "role": token_claims.type}
     refresh_token_claims = {
         "sub": token_claims.email,
@@ -193,3 +205,142 @@ def refresh_token(refresh_token: str = Cookie(), db: Session = Depends(get_db)):
 @router.get("/users/dummy")
 def dummy(user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user)):
     return {"message": f"checking token rotation {user.email}"}
+
+
+# logout route, Header() fetches "Authorization" parameter
+@router.post("/users/logout")
+def user_logout(
+    logout_user: auth_schema.UserLogout,
+    Authorization: str = Header(None),
+    refresh_token: str = Cookie(None),
+    db: Session = Depends(get_db),
+):
+    # check for Authorization Header of the request
+    if not Authorization:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Access token required"
+        )
+
+    # get the access token from the header
+    access_token = Authorization[len("Bearer ") :]
+    # print(access_token)
+
+    # check for refresh token cookie in the request
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Refresh token required"
+        )
+
+    # identify the user,to check whether user is logging out from his/her own account and not others.
+    # get user email from access token
+    get_user_claim = auth_utils.decode_token_get_user(access_token)
+    if not get_user_claim:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        )
+
+    # get user from db using email
+    user = user_service.get_user_by_email(get_user_claim, db)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # check username from request with username from user entry
+    if user.username != logout_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
+    # blacklist access token
+    auth_utils.blacklist_token(access_token)
+
+    if logout_user.action == "one":
+        # decode refresh token and get token id
+        refresh_token_id = auth_utils.decode_token_get_token_id(refresh_token)
+        if not refresh_token_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+            )
+
+        # blacklist refresh token using token id
+        auth_utils.blacklist_token(refresh_token_id)
+
+        # get user auth track entry
+        user_auth_track_entry = auth_service.get_auth_track_entry_by_token_id_query(
+            refresh_token_id, db
+        ).first()
+        if not user_auth_track_entry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User auth entry not found",
+            )
+
+        # get user_id and device_info to query and update user_session entry
+        user_id, device_info = (
+            user_auth_track_entry.user_id,
+            user_auth_track_entry.device_info,
+        )
+
+        # fetch the user session entry
+        user_logout_one_query = user_service.get_user_session_one_entry_query(
+            str(user_id), device_info, db
+        )
+        if not user_logout_one_query.first():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User Login/Session entry not found",
+            )
+
+        # update is_active in user session entry
+        user_logout_one_query.update({"is_active": False}, synchronize_session=False)
+
+        db.commit()
+
+    elif logout_user.action == "all":
+        # get all user auth entries based on user id
+        user_auth_track_entries = (
+            auth_service.get_all_user_auth_track_entries_by_user_id(str(user.id), db)
+        )
+        if not user_auth_track_entries:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User auth track entries not found",
+            )
+
+        # fetch all refresh token ids and blacklist them
+        all_refresh_token_ids = [
+            item.refresh_token_id for item in user_auth_track_entries
+        ]
+        for token_id in all_refresh_token_ids:
+            auth_utils.blacklist_token(token_id)
+
+        # fetch all user session entries
+        user_logout_all_query = user_service.get_user_session_entries_query_by_user_id(
+            str(user.id), db
+        )
+        if not user_logout_all_query.all():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User Login/Session entries not found",
+            )
+
+        # update is_active in user session entries
+        user_logout_all_query.update({"is_active": False}, synchronize_session=False)
+
+        db.commit()
+
+    response_data = {"message": f"{logout_user.username} successfully logged out"}
+    response = JSONResponse(content=response_data)
+
+    # delete refresh token cookie
+    response.delete_cookie(key="refresh_token")
+
+    # printing the blacklist cache to check token blacklisting
+    for key, value in auth_utils.token_blacklist_cache.items():
+        print(f"Key: {key}, Value: {value}")
+
+    return response

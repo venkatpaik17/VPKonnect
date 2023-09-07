@@ -57,11 +57,11 @@ BEGIN
     
     IF TG_ARGV[0]='one' THEN
         UPDATE user_auth_track 
-        SET status='invalid' 
+        SET status='invalid', updated_at = NOW()
         WHERE user_id=OLD.user_id AND device_info=OLD.device_info;
     ELSIF TG_ARGV[0]='all' THEN
         UPDATE user_auth_track 
-        SET status='invalid' 
+        SET status='invalid', updated_at = NOW()
         WHERE user_id=OLD.user_id;
     END IF;
     

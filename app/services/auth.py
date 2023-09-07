@@ -20,3 +20,11 @@ def get_auth_track_entry_by_token_id_query(token_id: str, db_session: Session):
     return db_session.query(auth_model.UserAuthTrack).filter(
         auth_model.UserAuthTrack.refresh_token_id == token_id
     )
+
+
+def get_all_user_auth_track_entries_by_user_id(user_id: str, db_session: Session):
+    return (
+        db_session.query(auth_model.UserAuthTrack)
+        .filter(auth_model.UserAuthTrack.user_id == user_id)
+        .all()
+    )

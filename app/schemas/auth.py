@@ -20,3 +20,8 @@ class AccessTokenPayload(BaseModel):
 class RefreshTokenPayload(AccessTokenPayload):
     device_info: str | None = None
     token_id: str | None = None
+
+
+class UserLogout(BaseModel):
+    username: str
+    action: str
