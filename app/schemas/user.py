@@ -23,3 +23,19 @@ class UserRegisterResponse(UserBase):
 
     class Config:
         orm_mode = True
+
+
+class UserPasswordReset(BaseModel):
+    email: EmailStr
+
+
+class UserPasswordChangeReset(BaseModel):
+    password: str
+    confirm_password: str
+    reset_token: str
+
+
+class UserPasswordChangeUpdate(BaseModel):
+    old_password: str
+    new_password: str
+    confirm_new_password: str

@@ -28,3 +28,10 @@ def get_all_user_auth_track_entries_by_user_id(user_id: str, db_session: Session
         .filter(auth_model.UserAuthTrack.user_id == user_id)
         .all()
     )
+
+
+# get the query for fetching all reset tokens of a user
+def get_user_password_reset_tokens_query(user_id: str, db_session: Session):
+    return db_session.query(auth_model.UserPasswordResetToken).filter(
+        auth_model.UserPasswordResetToken.user_id == user_id
+    )

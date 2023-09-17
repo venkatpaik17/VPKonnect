@@ -3,6 +3,7 @@ from typing import Any
 from pydantic import AnyHttpUrl, validator
 
 from app.config.base import BaseAppSettings
+from app.config.email import EmailSettings, email_settings
 
 
 class AppSettings(BaseAppSettings):
@@ -28,6 +29,10 @@ class AppSettings(BaseAppSettings):
     token_algorithm: str
     access_token_expire_minutes: int
     refresh_token_expire_minutes: int
+
+    email_settings: EmailSettings = email_settings
+    reset_token_expire_minutes: int
+    reset_token_secret_key: str
 
     allowed_cors_origin: str | list[AnyHttpUrl]
 

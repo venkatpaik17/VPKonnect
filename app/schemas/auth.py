@@ -25,3 +25,8 @@ class RefreshTokenPayload(AccessTokenPayload):
 class UserLogout(BaseModel):
     username: str
     action: str
+
+
+class ResetTokenPayload(BaseModel):
+    email: EmailStr | None = None
+    token_id: str | None = None

@@ -11,10 +11,20 @@ def get_user_by_username(username: str, db_session: Session):
     )
 
 
+def get_user_by_username_query(username: str, db_session: Session):
+    return db_session.query(user_model.User).filter(
+        user_model.User.username == username
+    )  # type:ignore
+
+
 def get_user_by_email(email: str, db_session: Session):
     return (
         db_session.query(user_model.User).filter(user_model.User.email == email).first()
     )
+
+
+def get_user_by_email_query(email: str, db_session: Session):
+    return db_session.query(user_model.User).filter(user_model.User.email == email)
 
 
 def check_username_exists(username: str, db_session: Session):

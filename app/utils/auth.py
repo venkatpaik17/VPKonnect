@@ -17,6 +17,8 @@ REFRESH_TOKEN_SECRET_KEY = settings.refresh_token_secret_key
 ALGORITHM = settings.token_algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_MINUTES = settings.refresh_token_expire_minutes
+RESET_TOKEN_SECRET_KEY = settings.reset_token_secret_key
+RESET_TOKEN_EXPIRE_MINUTES = settings.reset_token_expire_minutes
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 
@@ -53,6 +55,17 @@ def get_refresh_token_from_cookie(request: Request):
             detail="Refresh token not found in cookie",
         )
     return refresh_token
+
+
+# password reset token
+def create_reset_token(claims: dict):
+    reset_token_unique_id = get_uuid()
+    to_encode = claims.copy()
+    expire_time = datetime.utcnow() + timedelta(minutes=RESET_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire_time, "jti": reset_token_unique_id})
+    encoded_jwt_rt = jwt.encode(to_encode, RESET_TOKEN_SECRET_KEY, algorithm=ALGORITHM)
+
+    return encoded_jwt_rt, reset_token_unique_id
 
 
 def create_access_token(claims: dict):
@@ -99,6 +112,45 @@ def decode_token_get_token_id(token: str):
     return token_id if token_id else False
 
 
+def verify_reset_token(token: str):
+    try:
+        claims = jwt.decode(
+            token,
+            RESET_TOKEN_SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False},
+        )
+        user_email = claims.get("sub")
+        token_id = claims.get("jti")
+        token_exp = claims.get("exp")
+        if not user_email and not token_id and not token_exp:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Password reset failed, Reset token invalid",
+            )
+
+        # set token payload object
+        token_data = auth_schema.ResetTokenPayload(email=user_email, token_id=token_id)
+
+        # check token expiry
+        if token_exp < datetime.now().timestamp():
+            # blacklist the token if expired
+            blacklist_token(token_data.token_id)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Password reset failed, Reset token expired",
+            )
+    except HTTPException as exc:
+        raise exc
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        ) from exc
+
+    return token_data
+
+
 def verify_access_token(access_token: str):
     # decode the token
     try:
@@ -111,7 +163,7 @@ def verify_access_token(access_token: str):
         if not user_email and not user_type:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials 1",
+                detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
     # if token is expired
@@ -160,7 +212,7 @@ def verify_refresh_token(refresh_token: str):
         ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials 1",
+                detail="Could not validate credentials",
             )
         # set the token data
         token_data = auth_schema.RefreshTokenPayload(
@@ -173,7 +225,7 @@ def verify_refresh_token(refresh_token: str):
         # check the exp, epoch comparision. token_exp is epoch timezone specific. So we use now() for current time
         if token_exp < datetime.now().timestamp():
             # blacklist the token if expired
-            blacklist_token(refresh_token)
+            blacklist_token(token_data.token_id)
             # return the token data with false flag
             return (token_data, False)
     # other errors
