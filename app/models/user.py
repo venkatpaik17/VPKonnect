@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    and_,
     func,
     text,
 )
@@ -74,13 +75,19 @@ class User(Base):
     followers = relationship(
         "UserFollowAssociation",
         back_populates="followed",
-        primaryjoin=id == UserFollowAssociation.followed_user_id,
+        primaryjoin=and_(
+            id == UserFollowAssociation.followed_user_id,
+            UserFollowAssociation.status == "accepted",
+        ),
     )
 
     following = relationship(
         "UserFollowAssociation",
         back_populates="follower",
-        primaryjoin=id == UserFollowAssociation.follower_user_id,
+        primaryjoin=and_(
+            id == UserFollowAssociation.follower_user_id,
+            UserFollowAssociation.status == "accepted",
+        ),
     )
     usernames = relationship("UsernameChangeHistory", back_populates="username_user")
     passwords = relationship("PasswordChangeHistory", back_populates="password_user")

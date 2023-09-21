@@ -50,3 +50,14 @@ def get_user_session_entries_query_by_user_id(user_id: str, db_session: Session)
     return db_session.query(user_model.UserSession).filter(
         user_model.UserSession.user_id == user_id
     )
+
+
+# get user follow entry
+def get_user_follow_association_entry_query(
+    follower_id: str, followed_id: str, status: str, db_session: Session
+):
+    return db_session.query(user_model.UserFollowAssociation).filter(
+        user_model.UserFollowAssociation.follower_user_id == follower_id,
+        user_model.UserFollowAssociation.followed_user_id == followed_id,
+        user_model.UserFollowAssociation.status == status,
+    )

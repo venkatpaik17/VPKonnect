@@ -350,3 +350,156 @@ def change_password_update(
         ) from exc
 
     return {"message": "Password change successful"}
+
+
+# follow/unfollow users
+@router.post("/follow")
+def follow_user(
+    followed_user: user_schema.UserFollow,
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+    # get the user to be followed
+    user_followed = user_service.get_user_by_username(followed_user.username, db)
+    if not user_followed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User to be followed not found",
+        )
+
+    follower_user = user_service.get_user_by_email(current_user.email, db)
+
+    # user cannot follow/unfollow him/herself
+    if followed_user.username == follower_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User cannot follow/unfollow itself",
+        )
+
+    # get followed user's following
+    following_usernames = [
+        follower_association.follower.username
+        for follower_association in user_followed.followers
+    ]
+
+    # follow a user
+    if followed_user.action == "follow":
+        # check if already follows the user
+        if follower_user.username in following_usernames:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"You already are following {user_followed.username}",
+            )
+
+        # if user is private then send request orelse follow directly
+        if user_followed.account_visibility == "private":  # type: ignore
+            # check if follow request already sent
+            check_request_sent = user_service.get_user_follow_association_entry_query(
+                str(follower_user.id), str(user_followed.id), "pending", db
+            )
+            if check_request_sent.first():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Follow request is already sent",
+                )
+
+            follow_request = user_model.UserFollowAssociation(
+                status="pending", follower=follower_user, followed=user_followed
+            )
+            db.add(follow_request)
+            db.commit()
+
+            return {"message": f"Follow request sent to {followed_user.username}"}
+        else:
+            follow = user_model.UserFollowAssociation(
+                status="accepted", follower=follower_user, followed=user_followed
+            )
+            db.add(follow)
+            db.commit()
+
+            print(user_followed.followers)
+            return {"message": f"Following {followed_user.username}"}
+
+    # unfollow a user
+    elif followed_user.action == "unfollow":
+        # check if follows the user
+        if follower_user.username not in following_usernames:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"You are not following {user_followed.username}",
+            )
+        # get user follow entry query
+        user_follow_query = user_service.get_user_follow_association_entry_query(
+            str(follower_user.id), str(user_followed.id), "accepted", db
+        )
+        if not user_follow_query.first():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User follow entry not found",
+            )
+
+        # update the status to unfollowed
+        user_follow_query.update({"status": "unfollowed"}, synchronize_session=False)
+        db.commit()
+
+        following_usernames = [
+            follower_association.follower.username
+            for follower_association in user_followed.followers
+        ]
+        print(following_usernames)
+        return {"message": f"Unfollowed {followed_user.username}"}
+
+
+@router.put("/follow/requests/{username}")
+def manage_follow_request(
+    username: str,
+    follow_request: user_schema.UserFollowRequest,
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+    # check for user using username
+    follower_user = user_service.get_user_by_username(username, db)
+    if not follower_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # get current user object
+    user = user_service.get_user_by_email(current_user.email, db)
+
+    # check for user follow entry with status pending
+    user_follow_query = user_service.get_user_follow_association_entry_query(
+        str(follower_user.id), str(user.id), "pending", db
+    )
+    if not user_follow_query.first():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User follow entry not found"
+        )
+
+    # accept the follow request
+    if follow_request.action == "accept":
+        user_follow_query.update(
+            {
+                "status": "accepted",
+                "follower_user_id": follower_user.id,
+                "followed_user_id": user.id,
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+
+        return {"message": f"Following {user.username}"}
+
+    # reject the follow request
+    elif follow_request.action == "reject":
+        user_follow_query.update(
+            {
+                "status": "rejected",
+                "follower_user_id": follower_user.id,
+                "followed_user_id": user.id,
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+
+        return {"message": f"Rejected the request to follow {user.username}"}
