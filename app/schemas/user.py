@@ -47,3 +47,7 @@ class UserFollowRequest(BaseModel):
 
 class UserFollow(UserFollowRequest):
     username: str
+
+
+class UserUsernameChange(BaseModel):
+    new_username: str

@@ -212,7 +212,7 @@ def change_password_reset(
     # get the token, decode it, verify it
     token_claims = auth_utils.verify_reset_token(reset.reset_token)
 
-    # checklist token blacklist
+    # check token blacklist
     reset_token_blacklist_check = auth_utils.is_token_blacklisted(token_claims.token_id)
     if reset_token_blacklist_check:
         raise HTTPException(
@@ -503,3 +503,64 @@ def manage_follow_request(
         db.commit()
 
         return {"message": f"Rejected the request to follow {user.username}"}
+
+
+@router.post("/{username}/username/change")
+def username_change(
+    username: str,
+    new_username: str = Form(),
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+    update = user_schema.UserUsernameChange(new_username=new_username)
+
+    # get user from username
+    user_query = user_service.get_user_by_username_query(username, db)
+    user = user_query.first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # check user identity
+    if current_user.email != user.email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
+    # check if new username matches old username
+    if update.new_username == username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New username cannot be same as old username",
+        )
+
+    # check if new username already taken
+    username_exists = user_service.check_username_exists(update.new_username, db)
+    if username_exists:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Username {update.new_username} is already taken",
+        )
+
+    try:
+        # update username
+        user_query.update({"username": update.new_username}, synchronize_session=False)
+
+        # add entry to username change history table
+        add_username_change_history_entry = user_model.UsernameChangeHistory(
+            previous_username=username, user_id=user.id
+        )
+        db.add(add_username_change_history_entry)
+
+        db.commit()
+
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing username change request",
+        ) from exc
+
+    return {"message": "Username change successful"}
