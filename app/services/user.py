@@ -61,3 +61,22 @@ def get_user_follow_association_entry_query(
         user_model.UserFollowAssociation.followed_user_id == followed_id,
         user_model.UserFollowAssociation.status == status,
     )
+
+
+# check if follower or not
+def check_user_follower_or_not(follower_id: str, followed_id: str, db_session: Session):
+    return get_user_follow_association_entry_query(
+        follower_id, followed_id, status="accepted", db_session=db_session
+    ).first()
+
+
+# get user follow requests
+def get_user_follow_requests(followed_id: str, status: str, db_session: Session):
+    return (
+        db_session.query(user_model.UserFollowAssociation)
+        .filter(
+            user_model.UserFollowAssociation.followed_user_id == followed_id,
+            user_model.UserFollowAssociation.status == status,
+        )
+        .all()
+    )

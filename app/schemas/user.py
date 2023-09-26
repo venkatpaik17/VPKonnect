@@ -51,3 +51,19 @@ class UserFollow(UserFollowRequest):
 
 class UserUsernameChange(BaseModel):
     new_username: str
+
+
+class UserFollowersFollowing(BaseModel):
+    fetch: str
+
+
+class UserGetFollowRequestsResponse(BaseModel):
+    profile_picture: str | None
+    username: str
+
+    class Config:
+        orm_mode = True
+
+
+class UserFollowersFollowingResponse(UserGetFollowRequestsResponse):
+    follows_user: bool | None

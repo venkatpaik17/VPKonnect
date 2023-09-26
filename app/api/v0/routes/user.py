@@ -318,7 +318,7 @@ def change_password_update(
     )
     if not old_password_check:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Old password invalid"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Old password invalid"
         )
 
     # check both newly entered passwords
@@ -376,7 +376,7 @@ def follow_user(
             detail="User cannot follow/unfollow itself",
         )
 
-    # get followed user's following
+    # get followed user's followers
     following_usernames = [
         follower_association.follower.username
         for follower_association in user_followed.followers
@@ -450,6 +450,7 @@ def follow_user(
         return {"message": f"Unfollowed {followed_user.username}"}
 
 
+# accept/reject follow request
 @router.put("/follow/requests/{username}")
 def manage_follow_request(
     username: str,
@@ -505,6 +506,162 @@ def manage_follow_request(
         return {"message": f"Rejected the request to follow {user.username}"}
 
 
+# get all followers/following of a user
+@router.get(
+    "/{username}/follow",
+    response_model=list[user_schema.UserFollowersFollowingResponse],
+)
+def get_user_followers_following(
+    username: str,
+    request_info: user_schema.UserFollowersFollowing,
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+    # get user from username
+    user = user_service.get_user_by_username(username, db)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(str(current_user.email), db)
+
+    # get details only if owner or public account or follower
+    follower_check = user_service.check_user_follower_or_not(
+        str(curr_auth_user.id), str(user.id), db
+    )
+
+    if (username != curr_auth_user.username) and (user.account_visibility == "private" and not follower_check):  # type: ignore
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
+    # check the fetch
+    followers_list = []
+    following_list = []
+    curr_auth_user_following_usernames = [
+        following_association.followed.username
+        for following_association in curr_auth_user.following
+    ]
+    if request_info.fetch == "followers":
+        user_followers = [
+            follower_association.follower for follower_association in user.followers
+        ]
+        for follower in user_followers:
+            if follower.username in curr_auth_user_following_usernames:
+                followers_list.append(
+                    {
+                        "profile_picture": follower.profile_picture,
+                        "username": follower.username,
+                        "follows_user": True,
+                    }
+                )
+            else:
+                if follower.username == curr_auth_user.username:
+                    followers_list.append(
+                        {
+                            "profile_picture": follower.profile_picture,
+                            "username": follower.username,
+                            "follows_user": None,
+                        }
+                    )
+                else:
+                    followers_list.append(
+                        {
+                            "profile_picture": follower.profile_picture,
+                            "username": follower.username,
+                            "follows_user": False,
+                        }
+                    )
+
+        return followers_list
+
+    elif request_info.fetch == "following":
+        user_following = [
+            following_association.followed for following_association in user.following
+        ]
+        for following in user_following:
+            if following.username in curr_auth_user_following_usernames:
+                following_list.append(
+                    {
+                        "profile_picture": following.profile_picture,
+                        "username": following.username,
+                        "follows_user": True,
+                    }
+                )
+            else:
+                if following.username == curr_auth_user.username:
+                    following_list.append(
+                        {
+                            "profile_picture": following.profile_picture,
+                            "username": following.username,
+                            "follows_user": None,
+                        }
+                    )
+                else:
+                    following_list.append(
+                        {
+                            "profile_picture": following.profile_picture,
+                            "username": following.username,
+                            "follows_user": False,
+                        }
+                    )
+
+        return following_list
+
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Error processing request"
+        )
+
+
+# get all follow requests of a user
+@router.get(
+    "/{username}/follow/requests",
+    response_model=list[user_schema.UserGetFollowRequestsResponse],
+)
+def get_follow_requests(
+    username: str,
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+    # get user from username
+    user = user_service.get_user_by_username(username, db)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(current_user.email, db)
+
+    # check user identity
+    if username != curr_auth_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
+    # get all follow requests
+    user_follow_requests_entries = user_service.get_user_follow_requests(
+        str(user.id), "pending", db
+    )
+
+    requests_user_ids = [
+        entry.follower_user_id for entry in user_follow_requests_entries
+    ]
+    requests_users = (
+        db.query(user_model.User.profile_picture, user_model.User.username)
+        .filter(user_model.User.id.in_(requests_user_ids))
+        .all()
+    )
+    print(requests_users)
+    return requests_users
+
+
+# update username
 @router.post("/{username}/username/change")
 def username_change(
     username: str,
