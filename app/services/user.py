@@ -37,18 +37,25 @@ def check_user_exists(email: str, db_session: Session):
 
 # get the query for single user session entry
 def get_user_session_one_entry_query(
-    user_id: str, device_info: str, db_session: Session
+    user_id: str,
+    device_info: str,
+    is_active: bool,
+    db_session: Session,
 ):
     return db_session.query(user_model.UserSession).filter(
         user_model.UserSession.user_id == user_id,
         user_model.UserSession.device_info == device_info,
+        user_model.UserSession.is_active == is_active,
     )
 
 
 # get the query for all user session entries using user id
-def get_user_session_entries_query_by_user_id(user_id: str, db_session: Session):
+def get_user_session_entries_query_by_user_id(
+    user_id: str, is_active: bool, db_session: Session
+):
     return db_session.query(user_model.UserSession).filter(
-        user_model.UserSession.user_id == user_id
+        user_model.UserSession.user_id == user_id,
+        user_model.UserSession.is_active == is_active,
     )
 
 

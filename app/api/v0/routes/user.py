@@ -19,6 +19,7 @@ from app.config.app import settings
 from app.db.session import get_db
 from app.models import auth as auth_model
 from app.models import user as user_model
+from app.schemas import admin as admin_schema
 from app.schemas import auth as auth_schema
 from app.schemas import user as user_schema
 from app.services import auth as auth_service
@@ -165,11 +166,16 @@ def reset_password(
     # generate reset link
     reset_link = f"https://vpkonnect.in/accounts/password/change/?token={reset_token}"
 
+    email_subject = "VPKonnect - Password Reset Request"
+
     # send mail with reset link if user is valid, we will using mailtrap dummy server for testing
     try:
-        email_utils.send_email(
-            user.username, reset_user.email, reset_link, background_tasks
+        email_details = admin_schema.SendEmail(
+            template="password_reset_email.html",
+            email=[reset_user.email],
+            body_info={"username": user.username, "link": reset_link},
         )
+        email_utils.send_email(email_subject, email_details, background_tasks)
     except Exception as exc:
         auth_utils.blacklist_token(reset_token)
         raise HTTPException(
@@ -721,3 +727,69 @@ def username_change(
         ) from exc
 
     return {"message": "Username change successful"}
+
+
+# soft-delete the user account
+@router.patch("/{username}/remove")
+def soft_delete_user(
+    username: str,
+    background_tasks: BackgroundTasks,
+    password: str = Form(None),
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+    # check for password in the request
+    if not password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Password required"
+        )
+
+    # get user from username
+    user_query = user_service.get_user_by_username_query(username, db)
+    user = user_query.first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # check if password is right
+    password_check = password_utils.verify_password(password, user.password)
+    if not password_check:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
+        )
+
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(current_user.email, db)
+
+    # check user identity
+    if username != curr_auth_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform this action",
+        )
+
+    # send mail informing user about the account deletion, we will using mailtrap dummy server for testing
+    try:
+        email_subject = "Your VPKonnect account is scheduled for deletion"
+        email_details = admin_schema.SendEmail(
+            template="account_deletion_email.html",
+            email=[user.email],
+            body_info={"username": user.username},
+        )
+        email_utils.send_email(email_subject, email_details, background_tasks)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="There was an error in sending email",
+        ) from exc
+
+    # update is_deleted to true and status to hidden
+    user_query.update(
+        {"status": "deactivated", "is_deleted": True}, synchronize_session=False
+    )
+    db.commit()
+
+    return {
+        "message": f"Your account deletion request is accepted. {user.username} account will be deleted after a deactivation period of 30 days. An email for the same has been sent to {user.email}"
+    }

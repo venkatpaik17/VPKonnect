@@ -285,9 +285,9 @@ def user_logout(
             user_auth_track_entry.device_info,
         )
 
-        # fetch the user session entry
+        # fetch the active user session entry query
         user_logout_one_query = user_service.get_user_session_one_entry_query(
-            str(user_id), device_info, db
+            str(user_id), device_info, True, db
         )
         if not user_logout_one_query.first():
             raise HTTPException(
@@ -318,9 +318,9 @@ def user_logout(
         for token_id in all_refresh_token_ids:
             auth_utils.blacklist_token(token_id)
 
-        # fetch all user session entries
+        # fetch all active user session entries
         user_logout_all_query = user_service.get_user_session_entries_query_by_user_id(
-            str(user.id), db
+            str(user.id), True, db
         )
         if not user_logout_all_query.all():
             raise HTTPException(
