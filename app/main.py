@@ -1,3 +1,4 @@
+from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -6,6 +7,7 @@ from app.api.v0 import api_routes
 from app.config.app import settings
 from app.db.db_sqlalchemy import Base, engine
 from app.models import admin, auth, comment, post, user
+from app.utils import job_task as job_task_utils
 
 ENVIRONMENT = settings.app_environment
 SHOW_DOCS_ENVIRONMENT = ("dev", "test")
@@ -32,6 +34,26 @@ app.add_middleware(
 )
 
 app.include_router(api_routes.router)
+
+scheduler = BackgroundScheduler()
+
+
+@app.on_event("startup")
+def scheduler_init():
+    scheduler.add_job(
+        job_task_utils.delete_user_after_deactivation_period_expiration,
+        trigger="cron",
+        hour=5,
+        minute=30,
+        second=0,
+        timezone="UTC",
+    )
+    scheduler.start()
+
+
+@app.on_event("shutdown")
+def scheduler_end():
+    scheduler.shutdown()
 
 
 @app.get("/")

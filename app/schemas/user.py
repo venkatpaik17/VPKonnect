@@ -15,6 +15,8 @@ class UserRegister(UserBase):
     date_of_birth: date
     gender: str
     country: str | None = None
+    account_visibility: str | None
+    bio: str | None = None
 
 
 class UserRegisterResponse(UserBase):
@@ -67,3 +69,8 @@ class UserGetFollowRequestsResponse(BaseModel):
 
 class UserFollowersFollowingResponse(UserGetFollowRequestsResponse):
     follows_user: bool | None
+
+
+class UserDeletion(BaseModel):
+    password: str
+    hide_interactions: bool = False

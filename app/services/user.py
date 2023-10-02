@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import user as user_model
@@ -86,4 +89,12 @@ def get_user_follow_requests(followed_id: str, status: str, db_session: Session)
             user_model.UserFollowAssociation.status == status,
         )
         .all()
+    )
+
+
+def check_deactivation_expiration_query(db_session: Session):
+    pattern = r"(_keep|_hide)$"
+    return db_session.query(user_model.User).filter(
+        user_model.User.status.op("~")(pattern),
+        func.now() > user_model.User.updated_at + timedelta(days=30),
     )

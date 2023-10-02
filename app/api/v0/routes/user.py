@@ -735,6 +735,7 @@ def soft_delete_user(
     username: str,
     background_tasks: BackgroundTasks,
     password: str = Form(None),
+    hide_interactions: bool = Form(),
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
@@ -743,6 +744,11 @@ def soft_delete_user(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Password required"
         )
+
+    # create object
+    delete_request = user_schema.UserDeletion(
+        password=password, hide_interactions=hide_interactions
+    )
 
     # get user from username
     user_query = user_service.get_user_by_username_query(username, db)
@@ -753,7 +759,9 @@ def soft_delete_user(
         )
 
     # check if password is right
-    password_check = password_utils.verify_password(password, user.password)
+    password_check = password_utils.verify_password(
+        delete_request.password, user.password
+    )
     if not password_check:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
@@ -778,17 +786,25 @@ def soft_delete_user(
             body_info={"username": user.username},
         )
         email_utils.send_email(email_subject, email_details, background_tasks)
+
+        # update status to pending_deletion_(hide/keep)
+        if delete_request.hide_interactions:
+            user_query.update(
+                {"status": "pending_delete_hide"},
+                synchronize_session=False,
+            )
+        else:
+            user_query.update(
+                {"status": "pending_delete_keep"},
+                synchronize_session=False,
+            )
+        db.commit()
     except Exception as exc:
+        print(exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="There was an error in sending email",
+            detail="There was an error in processing delete user request",
         ) from exc
-
-    # update is_deleted to true and status to hidden
-    user_query.update(
-        {"status": "deactivated", "is_deleted": True}, synchronize_session=False
-    )
-    db.commit()
 
     return {
         "message": f"Your account deletion request is accepted. {user.username} account will be deleted after a deactivation period of 30 days. An email for the same has been sent to {user.email}"

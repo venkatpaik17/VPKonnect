@@ -303,7 +303,9 @@ def user_logout(
     elif logout_user.action == "all":
         # get all user auth entries based on user id
         user_auth_track_entries = (
-            auth_service.get_all_user_auth_track_entries_by_user_id(str(user.id), db)
+            auth_service.get_all_user_auth_track_entries_by_user_id(
+                str(user.id), "active", db
+            )
         )
         if not user_auth_track_entries:
             raise HTTPException(
