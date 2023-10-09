@@ -51,26 +51,15 @@ EXECUTE FUNCTION update_activity_detail('Users_Deleted');
 /*update to simplify operation based on no of rows updated, this makes updates redundant, unnecessary*/
 CREATE OR REPLACE FUNCTION update_user_auth_track()
 RETURNS TRIGGER AS $$
-DECLARE
-    num_rows_affected INT;
 BEGIN
-    GET DIAGNOSTICS num_rows_affected = ROW_COUNT;
-
-    IF num_rows_affected = 1 THEN
-        -- Handle single row update
-        UPDATE user_auth_track 
-        SET status = 'invalid', updated_at = NOW()
-        WHERE user_id = OLD.user_id AND device_info = OLD.device_info;
-    ELSE
-        -- Handle multiple row update
-        UPDATE user_auth_track 
-        SET status = 'invalid', updated_at = NOW()
-        WHERE user_id = OLD.user_id;
-    END IF;
-
+    UPDATE user_auth_track 
+    SET status='invalid', updated_at = NOW()
+    WHERE user_id=OLD.user_id AND device_info=OLD.device_info;
+   
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
+
 
 /*trigger upon update user_session when is_active changes to FALSE*/
 CREATE TRIGGER user_auth_track_logout_trigger
@@ -88,7 +77,9 @@ EXECUTE FUNCTION update_user_auth_track();
 # If the action is 'unhide' and the previous status was 'pending_delete_hide,' it updates all four tables, setting the 'post' and 'comment' tables with the status 'published' and the 'post_like' and 'comment_like' tables with status 'active.'
 # If the action is 'unhide' and the previous status was 'pending_delete_keep,' it updates only the 'post' table, with the status 'published.'
 # If the action is 'delete', it updates all four tables with status 'deleted' and is_deleted = TRUE
+# If any interaction is deleted or removed by user then it should not be hidden or restored during hide/keep/unhide. i.e., if post, comment, post_like, comment_like 'status' is 'deleted' and is_deleted is TRUE then keep it as it is. No update.
 */
+
 CREATE OR REPLACE FUNCTION update_user_info_status()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -126,7 +117,7 @@ BEGIN
         IF EXISTS (SELECT 1 FROM post WHERE user_id = user_id_param) THEN
             -- Update 'post' table
             UPDATE post
-            SET status = new_status
+            SET status = CASE WHEN post.status = 'deleted' THEN post.status ELSE new_status END
             WHERE user_id = user_id_param;
         END IF;
         
@@ -135,7 +126,7 @@ BEGIN
         IF EXISTS (SELECT 1 FROM post WHERE user_id = user_id_param) THEN
             -- Update 'post' table
             UPDATE post
-            SET status = new_status, is_deleted = CASE WHEN action = 'delete' THEN new_is_deleted ELSE FALSE END
+            SET status = CASE WHEN post.status = 'deleted' THEN post.status ELSE new_status END, is_deleted = CASE WHEN action = 'delete' OR post_like.is_deleted = TRUE THEN new_is_deleted ELSE FALSE END
             WHERE user_id = user_id_param;
         END IF;
         
@@ -143,7 +134,7 @@ BEGIN
         IF EXISTS (SELECT 1 FROM comment WHERE user_id = user_id_param) THEN
             -- Update 'comment' table
             UPDATE comment
-            SET status = new_status, is_deleted = CASE WHEN action = 'delete' THEN new_is_deleted ELSE FALSE END
+            SET status = CASE WHEN comment.status = 'deleted' THEN comment.status ELSE new_status END, is_deleted = CASE WHEN action = 'delete' OR post_like.is_deleted = TRUE THEN new_is_deleted ELSE FALSE END
             WHERE user_id = user_id_param;
         END IF;
     
@@ -151,7 +142,7 @@ BEGIN
         IF EXISTS (SELECT 1 FROM post_like WHERE user_id = user_id_param) THEN
             -- Update 'post_like' table
             UPDATE post_like
-            SET status = CASE WHEN action = 'unhide' THEN 'active' ELSE new_status END, is_deleted = CASE WHEN action = 'delete' THEN new_is_deleted ELSE FALSE END
+            SET status = CASE WHEN post_like.status = 'deleted' THEN post_like.status WHEN action = 'unhide' THEN 'active' ELSE new_status END, is_deleted = CASE WHEN action = 'delete' OR post_like.is_deleted = TRUE THEN new_is_deleted ELSE FALSE END
             WHERE user_id = user_id_param;
         END IF;
     
@@ -159,7 +150,7 @@ BEGIN
         IF EXISTS (SELECT 1 FROM comment_like WHERE user_id = user_id_param) THEN
             -- Update 'comment_like' table
             UPDATE comment_like
-            SET status = CASE WHEN action = 'unhide' THEN 'active' ELSE new_status END, is_deleted = CASE WHEN action = 'delete' THEN new_is_deleted ELSE FALSE END
+            SET status = CASE WHEN comment_like.status = 'deleted' THEN comment_like.status WHEN action = 'unhide' THEN 'active' ELSE new_status END, is_deleted = CASE WHEN action = 'delete' OR comment_like.is_deleted = TRUE THEN new_is_deleted ELSE FALSE END
             WHERE user_id = user_id_param;
         END IF;
     END IF;
