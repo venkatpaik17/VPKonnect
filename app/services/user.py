@@ -4,38 +4,47 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import user as user_model
+from app.utils import enum as enum_utils
 
 
-def get_user_by_username(username: str, db_session: Session):
-    return (
-        db_session.query(user_model.User)
-        .filter(user_model.User.username == username)  # type:ignore
-        .first()
-    )
+def get_user_by_username(
+    username: str, status_not_in_list: list[str], db_session: Session
+):
+    return get_user_by_username_query(username, status_not_in_list, db_session).first()
 
 
-def get_user_by_username_query(username: str, db_session: Session):
+def get_user_by_username_query(
+    username: str, status_not_in_list: list[str], db_session: Session
+):
     return db_session.query(user_model.User).filter(
-        user_model.User.username == username
-    )  # type:ignore
-
-
-def get_user_by_email(email: str, db_session: Session):
-    return (
-        db_session.query(user_model.User).filter(user_model.User.email == email).first()
+        user_model.User.username == username,
+        user_model.User.status.notin_(status_not_in_list),
     )
 
 
-def get_user_by_email_query(email: str, db_session: Session):
-    return db_session.query(user_model.User).filter(user_model.User.email == email)
+def get_user_by_email(email: str, status_not_in_list: list[str], db_session: Session):
+    return get_user_by_email_query(email, status_not_in_list, db_session).first()
+
+
+def get_user_by_email_query(
+    email: str, status_not_in_list: list[str], db_session: Session
+):
+    return db_session.query(user_model.User).filter(
+        user_model.User.email == email,
+        user_model.User.status.notin_(status_not_in_list),
+    )
 
 
 def check_username_exists(username: str, db_session: Session):
-    return get_user_by_username(username, db_session)
+    return get_user_by_username_query(
+        username, [enum_utils.UserStatusEnum.DELETED], db_session
+    ).first()
 
 
 def check_user_exists(email: str, db_session: Session):
-    return get_user_by_email(email, db_session)
+    return get_user_by_email_query(
+        email, [enum_utils.UserStatusEnum.DELETED], db_session
+    ).first()
 
 
 # get the query for single user session entry
@@ -92,9 +101,14 @@ def get_user_follow_requests(followed_id: str, status: str, db_session: Session)
     )
 
 
+# get users whose deactivation period is done
 def check_deactivation_expiration_query(db_session: Session):
-    pattern = r"(_keep|_hide)$"
     return db_session.query(user_model.User).filter(
-        user_model.User.status.op("~")(pattern),
+        user_model.User.status.in_(
+            [
+                enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
+                enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+            ]
+        ),
         func.now() > user_model.User.updated_at + timedelta(days=30),
     )

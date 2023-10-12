@@ -4,6 +4,8 @@ from datetime import date, datetime
 from fastapi import HTTPException, status
 from pydantic import BaseModel, EmailStr, Field, validator
 
+from app.utils import enum as enum_utils
+
 
 class UserBase(BaseModel):
     first_name: str = Field(min_length=1, max_length=50)
@@ -31,12 +33,12 @@ class UserRegister(UserBase):
     date_of_birth: date
     gender: str
     country: str | None = None
-    account_visibility: str | None
+    account_visibility: enum_utils.UserAccountVisibilityEnum | None
     bio: str | None = None
 
 
 class UserRegisterResponse(UserBase):
-    account_visibility: str
+    account_visibility: enum_utils.UserAccountVisibilityEnum
     profile_picture: str | None
     created_at: datetime
 

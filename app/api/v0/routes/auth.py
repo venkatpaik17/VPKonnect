@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Cookie, Depends, Form, Header, HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
@@ -12,6 +14,7 @@ from app.schemas import auth as auth_schema
 from app.services import auth as auth_service
 from app.services import user as user_service
 from app.utils import auth as auth_utils
+from app.utils import enum as enum_utils
 from app.utils import password as password_utils
 
 router = APIRouter(tags=["Authentication"])
@@ -33,10 +36,15 @@ def user_login(
     is_email = auth_utils.check_username_or_email(credentials.username)
     # check if username field is email or username
     if is_email:
-        user = user_service.get_user_by_email(credentials.username, db)
+        user_query = user_service.get_user_by_email_query(
+            credentials.username, [enum_utils.UserStatusEnum.DELETED], db
+        )
     else:
-        user = user_service.get_user_by_username(credentials.username, db)
+        user_query = user_service.get_user_by_username_query(
+            credentials.username, [enum_utils.UserStatusEnum.DELETED], db
+        )
 
+    user = user_query.first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Credentials"
@@ -46,6 +54,17 @@ def user_login(
     if not verify_pass:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Credentials"
+        )
+
+    if user.status == enum_utils.UserStatusEnum.TEMPORARY_BAN:  # type: ignore
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been disabled. Please contact support for assistance.",
+        )
+    if user.status == enum_utils.UserStatusEnum.PERMANENT_BAN:  # type: ignore
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been banned. Please contact support for assistance.",
         )
 
     # set the claims for token generation
@@ -78,7 +97,18 @@ def user_login(
     # print(user_device_info)
 
     # add login session to user session table and add an entry to user auth track to track the refresh token wrt to user and device
+    # if account is deactivated then it should be activated by updating status to active
     try:
+        if user.status in [
+            enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
+            enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+            enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
+            enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
+        ]:
+            user_query.update(
+                {"status": enum_utils.UserStatusEnum.ACTIVE}, synchronize_session=False
+            )
+
         add_user_session = user_model.UserSession(
             device_info=user_device_info, user_id=user.id
         )
@@ -93,7 +123,11 @@ def user_login(
         db.commit()
 
     except SQLAlchemyError as exc:
+        # roll back and blacklist tokens
         db.rollback()
+        auth_utils.blacklist_token(user_access_token)
+        auth_utils.blacklist_token(refresh_token_unique_id)
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing login request",
@@ -153,11 +187,34 @@ def refresh_token(refresh_token: str = Cookie(None), db: Session = Depends(get_d
             secure=True,
         )
         try:
-            user = user_service.get_user_by_email(token_claims.email, db)
+            user = user_service.get_user_by_email(
+                token_claims.email,
+                [
+                    enum_utils.UserStatusEnum.PERMANENT_BAN,
+                    enum_utils.UserStatusEnum.DELETED,
+                ],
+                db,
+            )
             if not user:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
                 )
+            if user.status in [
+                enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
+                enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
+                enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
+                enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+            ]:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User profile not found",
+                )
+            if user.status == enum_utils.UserStatusEnum.TEMPORARY_BAN:  # type: ignore
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Unable to process the request",
+                )
+
             add_user_auth_track = auth_model.UserAuthTrack(
                 refresh_token_id=refresh_token_unique_id,
                 device_info=token_claims.device_info,
@@ -165,7 +222,7 @@ def refresh_token(refresh_token: str = Cookie(None), db: Session = Depends(get_d
             )
 
             user_auth_entry = auth_service.get_auth_track_entry_by_token_id_query(
-                token_claims.token_id, db
+                token_claims.token_id, enum_utils.UserAuthTrackStatusEnum.ACTIVE, db
             )
             if not user_auth_entry.first():
                 raise HTTPException(
@@ -174,7 +231,10 @@ def refresh_token(refresh_token: str = Cookie(None), db: Session = Depends(get_d
                 )
 
             db.add(add_user_auth_track)
-            user_auth_entry.update({"status": "expired"}, synchronize_session=False)
+            user_auth_entry.update(
+                {"status": enum_utils.UserAuthTrackStatusEnum.EXPIRED},
+                synchronize_session=False,
+            )
 
             db.commit()
 
@@ -190,7 +250,7 @@ def refresh_token(refresh_token: str = Cookie(None), db: Session = Depends(get_d
 
     # check refresh token status
     token_active = auth_service.check_refresh_token_id_in_user_auth_track(
-        token_claims.token_id, db
+        token_claims.token_id, enum_utils.UserAuthTrackStatusEnum.ACTIVE, db
     )
     if not token_active:
         raise HTTPException(
@@ -241,10 +301,29 @@ def user_logout(
         )
 
     # get user from db using email
-    user = user_service.get_user_by_email(get_user_claim, db)
+    user = user_service.get_user_by_email(
+        get_user_claim,
+        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        db,
+    )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    if user.status in [
+        enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
+        enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
+        enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
+        enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+    ]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found",
+        )
+    if user.status == enum_utils.UserStatusEnum.TEMPORARY_BAN:  # type: ignore
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unable to process the request",
         )
 
     # check username from request with username from user entry
@@ -271,7 +350,7 @@ def user_logout(
 
         # get user auth track entry
         user_auth_track_entry = auth_service.get_auth_track_entry_by_token_id_query(
-            refresh_token_id, db
+            refresh_token_id, enum_utils.UserAuthTrackStatusEnum.ACTIVE, db
         ).first()
         if not user_auth_track_entry:
             raise HTTPException(
@@ -304,7 +383,7 @@ def user_logout(
         # get all user auth entries based on user id
         user_auth_track_entries = (
             auth_service.get_all_user_auth_track_entries_by_user_id(
-                str(user.id), "active", db
+                str(user.id), enum_utils.UserAuthTrackStatusEnum.ACTIVE, db
             )
         )
         if not user_auth_track_entries:
