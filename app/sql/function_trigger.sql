@@ -34,10 +34,15 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-/*trigger upon insert user*/
+/*
+trigger upon update
+#updating User_Added trigger
+#instead of ON INSERT it will be ON UPDATE after verification
+*/
 CREATE TRIGGER user_add_activity_detail_trigger
-AFTER INSERT ON "user"
+AFTER UPDATE ON "user"
 FOR EACH ROW
+WHEN (OLD.status = 'INA'::user_status_enum AND NEW.status = 'ACT'::user_status_enum AND NEW.is_verified = TRUE)
 EXECUTE FUNCTION update_activity_detail('Users_Added');
 
 /*trigger upon status for deactivated, restored and deleted user*/
@@ -47,10 +52,11 @@ FOR EACH ROW
 WHEN (NEW.status = 'PDH'::user_status_enum OR NEW.status = 'PDK'::user_status_enum)
 EXECUTE FUNCTION update_activity_detail('Users_Deactivated');
 
+/*updating User_restored trigger*/
 CREATE TRIGGER user_active_activity_detail_trigger
 AFTER UPDATE ON "user"
 FOR EACH ROW
-WHEN (NEW.status = 'ACT'::user_status_enum)
+WHEN ((OLD.status = 'PDK'::user_status_enum OR OLD.status = 'PDH'::user_status_enum OR OLD.status = 'DAH'::user_status_enum OR OLD.status = 'DAK'::user_status_enum) AND NEW.status = 'ACT'::user_status_enum)
 EXECUTE FUNCTION update_activity_detail('Users_Restored');
 
 CREATE TRIGGER user_delete_activity_detail_trigger

@@ -101,3 +101,13 @@ class UserAuthTrackStatusEnum(str, Enum):
     ACTIVE = "ACT"
     EXPIRED = "EXP"
     INVALID = "INV"
+
+
+class UserVerificationCodeTokenTypeEnum(str, Enum):
+    """
+    Enum for userverificationcodetoken type values 'password_reset', 'user_verify', 'ban_verify'
+    """
+
+    PASSWORD_RESET = "PWR"
+    USER_VERIFY = "USV"
+    BAN_VERIFY = "BNV"

@@ -33,8 +33,11 @@ def get_all_user_auth_track_entries_by_user_id(
     )
 
 
-# get the query for fetching all reset tokens of a user
-def get_user_password_reset_tokens_query(user_id: str, db_session: Session):
-    return db_session.query(auth_model.UserPasswordResetToken).filter(
-        auth_model.UserPasswordResetToken.user_id == user_id
+# get the query for fetching all codes/tokens of a user
+def get_user_verification_codes_tokens_query(
+    user_id: str, _type: str, db_session: Session
+):
+    return db_session.query(auth_model.UserVerificationCodeToken).filter(
+        auth_model.UserVerificationCodeToken.user_id == user_id,
+        auth_model.UserVerificationCodeToken.type == _type,
     )

@@ -33,6 +33,8 @@ class AppSettings(BaseAppSettings):
     email_settings: EmailSettings = email_settings
     reset_token_expire_minutes: int
     reset_token_secret_key: str
+    user_verify_token_secret_key: str
+    user_verify_token_expire_minutes: int
 
     allowed_cors_origin: str | list[AnyHttpUrl]
 

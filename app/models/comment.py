@@ -2,6 +2,7 @@ from sqlalchemy import (
     TIMESTAMP,
     Boolean,
     Column,
+    Enum,
     ForeignKey,
     Integer,
     String,
@@ -12,7 +13,6 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.db_sqlalchemy import Base
-from app.models import user
 
 
 # orm model for comment table
@@ -22,8 +22,13 @@ class Comment(Base):
         UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
     )
     content = Column(String(length=2200), nullable=False)
+    # status = Column(
+    #     String(length=20), nullable=False, server_default=text("'published'")
+    # )
     status = Column(
-        String(length=20), nullable=False, server_default=text("'published'")
+        Enum(name="comment_status_enum"),
+        nullable=False,
+        server_default=text("'PUB'::comment_status_enum"),
     )
     is_deleted = Column(Boolean, nullable=False, server_default="False")
     created_at = Column(
@@ -66,6 +71,11 @@ class CommentLike(Base):
         UUID(as_uuid=True),
         ForeignKey("comment.id", ondelete="CASCADE"),
         primary_key=True,
+    )
+    status = Column(
+        Enum(name="comment_like_status_enum"),
+        nullable=False,
+        server_default=text("'ACT'::comment_like_status_enum"),
     )
     comment_like_user = relationship(
         "User", back_populates="comment_likes", foreign_keys=[user_id]

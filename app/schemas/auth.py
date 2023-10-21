@@ -30,3 +30,7 @@ class UserLogout(BaseModel):
 class ResetTokenPayload(BaseModel):
     email: EmailStr | None = None
     token_id: str | None = None
+
+
+class UserVerifyTokenPayload(ResetTokenPayload):
+    pass

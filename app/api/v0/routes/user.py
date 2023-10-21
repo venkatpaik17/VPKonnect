@@ -11,7 +11,9 @@ from fastapi import (
     status,
 )
 from PIL import Image, UnidentifiedImageError
+from pydantic import EmailStr
 from pyfa_converter import FormDepends
+from sqlalchemy import desc
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -35,8 +37,9 @@ router = APIRouter(prefix="/users", tags=["Users"])
 MAX_SIZE = 5 * 1024 * 1024
 
 
-@router.post("/register", response_model=user_schema.UserRegisterResponse)
+@router.post("/register")
 def create_user(
+    background_tasks: BackgroundTasks,
     request: user_schema.UserRegister = FormDepends(user_schema.UserRegister),  # type: ignore
     db: Session = Depends(get_db),
     image: UploadFile | None = None,
@@ -145,12 +148,148 @@ def create_user(
         db.add(add_user)
         db.commit()
 
-    # store image directly in the DB
-    # add_user = user_model.User(**request.dict(), profile_picture=image.file.read())
+        # store image directly in the DB
+        # add_user = user_model.User(**request.dict(), profile_picture=image.file.read())
 
-    db.refresh(add_user)
+        db.refresh(add_user)
 
-    return add_user
+    # generate a token
+    claims = {"sub": add_user.email, "role": add_user.type}
+    user_verify_token, user_verify_token_id = auth_utils.create_user_verify_token(
+        claims
+    )
+
+    # generate verification link
+    verify_link = (
+        f"https://vpkonnect.in/accounts/signup/verify/?token={user_verify_token}"
+    )
+
+    try:
+        email_subject = "VPKonnect - User Verification - Account Signup"
+        email_details = admin_schema.SendEmail(
+            template="user_account_signup_verification.html",
+            email=[EmailStr(add_user.email)],
+            body_info={"first_name": add_user.first_name, "link": verify_link},
+        )
+        # send email
+        email_utils.send_email(email_subject, email_details, background_tasks)
+
+        # add the token to userverificationcodetoken table
+        add_user_verify_token = auth_model.UserVerificationCodeToken(
+            code_token_id=user_verify_token_id,
+            type=enum_utils.UserVerificationCodeTokenTypeEnum.USER_VERIFY,
+            user_id=add_user.id,
+        )
+        db.add(add_user_verify_token)
+        db.commit()
+
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing verification email request",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error sending verification email.",
+        ) from exc
+
+    return {
+        "message": f"User registration verification process - An email has been sent to {add_user.email} for verification."
+    }
+
+
+@router.post("/register/verify", response_model=user_schema.UserVerifyResponse)
+def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db)):
+    # decode token
+    token_claims = auth_utils.verify_user_verify_token(user_verify_token)
+    user_verify_token_blacklist_check = auth_utils.is_token_blacklisted(
+        token_claims.token_id
+    )
+    if user_verify_token_blacklist_check:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User verification failed, Token invalid/revoked",
+        )
+
+    # get the user
+    user_query = user_service.get_user_by_email_query(
+        token_claims.email,
+        [
+            enum_utils.UserStatusEnum.ACTIVE,
+            enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
+            enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
+            enum_utils.UserStatusEnum.RESTRICTED_FULL,
+            enum_utils.UserStatusEnum.RESTRICTED_PARTIAL,
+            enum_utils.UserStatusEnum.TEMPORARY_BAN,
+            enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
+            enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+            enum_utils.UserStatusEnum.PERMANENT_BAN,
+            enum_utils.UserStatusEnum.DELETED,
+        ],
+        db,
+    )
+    user = user_query.first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="New user to be registered not found",
+        )
+
+    # get the query to fetch all user verify token ids related to the user
+    user_verify_token_ids_query = auth_service.get_user_verification_codes_tokens_query(
+        str(user.id), enum_utils.UserVerificationCodeTokenTypeEnum.USER_VERIFY, db
+    )
+
+    # check if token id of token got from request exists
+    check_token_id = (
+        user_verify_token_ids_query.filter(
+            auth_model.UserVerificationCodeToken.code_token_id == token_claims.token_id,
+            auth_model.UserVerificationCodeToken.is_deleted == False,
+        )
+        .order_by(desc(auth_model.UserVerificationCodeToken.created_at))
+        .first()
+    )
+
+    if not check_token_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User verification failed, Reset token not found",
+        )
+
+    try:
+        # update is_deleted to True for all user verify tokens and blacklist all token ids
+        user_verify_token_ids_query.update(
+            {"is_deleted": True}, synchronize_session=False
+        )
+        user_verify_token_ids = [
+            item.code_token_id for item in user_verify_token_ids_query.all()
+        ]
+
+        for token_id in user_verify_token_ids:
+            auth_utils.blacklist_token(token_id)
+
+        # update is_verified to True, status to ACT in user
+        user_query.update(
+            {"status": enum_utils.UserStatusEnum.ACTIVE, "is_verified": True},
+            synchronize_session=False,
+        )
+
+        db.commit()
+        db.refresh(user)
+
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing user verification request",
+        ) from exc
+
+    return {
+        "message": "User verified successfully, User account created.",
+        "data": user,
+    }
 
 
 # password change routes
@@ -205,8 +344,10 @@ def reset_password(
         ) from exc
 
     # add the token id to user password reset token table
-    add_reset_token_id = auth_model.UserPasswordResetToken(
-        reset_token_id=reset_token_id, user_id=user.id
+    add_reset_token_id = auth_model.UserVerificationCodeToken(
+        code_token_id=reset_token_id,
+        type=enum_utils.UserVerificationCodeTokenTypeEnum.PASSWORD_RESET,
+        user_id=user.id,
     )
     db.add(add_reset_token_id)
     db.commit()
@@ -268,14 +409,22 @@ def change_password_reset(
 
     # get query to fetch all reset token ids related to the user
     user_password_reset_tokens_query = (
-        auth_service.get_user_password_reset_tokens_query(str(user.id), db)
+        auth_service.get_user_verification_codes_tokens_query(
+            str(user.id),
+            enum_utils.UserVerificationCodeTokenTypeEnum.PASSWORD_RESET,
+            db,
+        )
     )
 
     # check if token id of token got in form request exists
-    token_id_check = user_password_reset_tokens_query.filter(
-        auth_model.UserPasswordResetToken.reset_token_id == token_claims.token_id,
-        auth_model.UserPasswordResetToken.is_deleted == False,
-    ).first()
+    token_id_check = (
+        user_password_reset_tokens_query.filter(
+            auth_model.UserVerificationCodeToken.code_token_id == token_claims.token_id,
+            auth_model.UserVerificationCodeToken.is_deleted == False,
+        )
+        .order_by(desc(auth_model.UserVerificationCodeToken.created_at))
+        .first()
+    )
     if not token_id_check:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

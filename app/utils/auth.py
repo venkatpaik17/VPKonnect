@@ -1,5 +1,4 @@
 import re
-import time
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -19,6 +18,8 @@ ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_MINUTES = settings.refresh_token_expire_minutes
 RESET_TOKEN_SECRET_KEY = settings.reset_token_secret_key
 RESET_TOKEN_EXPIRE_MINUTES = settings.reset_token_expire_minutes
+USER_VERIFY_TOKEN_SECRET_KEY = settings.user_verify_token_secret_key
+USER_VERIFY_TOKEN_EXPIRE_MINUTES = settings.user_verify_token_expire_minutes
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 
@@ -66,6 +67,20 @@ def create_reset_token(claims: dict):
     encoded_jwt_rt = jwt.encode(to_encode, RESET_TOKEN_SECRET_KEY, algorithm=ALGORITHM)
 
     return encoded_jwt_rt, reset_token_unique_id
+
+
+def create_user_verify_token(claims: dict):
+    user_verify_token_unique_id = get_uuid()
+    to_encode = claims.copy()
+    expire_time = datetime.utcnow() + timedelta(
+        minutes=USER_VERIFY_TOKEN_EXPIRE_MINUTES
+    )
+    to_encode.update({"exp": expire_time, "jti": user_verify_token_unique_id})
+    encoded_jwt_uvt = jwt.encode(
+        to_encode, USER_VERIFY_TOKEN_SECRET_KEY, algorithm=ALGORITHM
+    )
+
+    return encoded_jwt_uvt, user_verify_token_unique_id
 
 
 def create_access_token(claims: dict):
@@ -139,6 +154,47 @@ def verify_reset_token(token: str):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Password reset failed, Reset token expired",
+            )
+    except HTTPException as exc:
+        raise exc
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        ) from exc
+
+    return token_data
+
+
+def verify_user_verify_token(token: str):
+    try:
+        claims = jwt.decode(
+            token,
+            USER_VERIFY_TOKEN_SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False},
+        )
+        user_email = claims.get("sub")
+        token_id = claims.get("jti")
+        token_exp = claims.get("exp")
+        if not user_email and not token_id and not token_exp:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User verification failed, Verify token invalid",
+            )
+
+        # set token payload object
+        token_data = auth_schema.UserVerifyTokenPayload(
+            email=user_email, token_id=token_id
+        )
+
+        # check token expiry
+        if token_exp < datetime.now().timestamp():
+            # blacklist the token if expired
+            blacklist_token(token_data.token_id)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User verification failed, Verify token expired",
             )
     except HTTPException as exc:
         raise exc

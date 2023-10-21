@@ -46,6 +46,11 @@ class UserRegisterResponse(UserBase):
         orm_mode = True
 
 
+class UserVerifyResponse(BaseModel):
+    message: str
+    data: UserRegisterResponse
+
+
 class UserPasswordReset(BaseModel):
     email: EmailStr
 

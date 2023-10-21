@@ -2,6 +2,7 @@ from sqlalchemy import (
     TIMESTAMP,
     Boolean,
     Column,
+    Enum,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -23,9 +24,11 @@ class Post(Base):
     )
 
     # length param is just a hint for db schema, not a enforced restriction, 20MiB is limit
-    image = Column(LargeBinary(length=20971520), nullable=False)
+    # image = Column(LargeBinary(length=20971520), nullable=False)
+    image = Column(String, nullable=False)
     caption = Column(String(length=2200), nullable=True)
-    status = Column(String(length=20), nullable=False)
+    # status = Column(String(length=20), nullable=False)
+    status = Column(Enum(name="post_status_enum"), nullable=False)
     is_deleted = Column(Boolean, nullable=False, server_default="False")
     created_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
@@ -58,6 +61,12 @@ class PostLike(Base):
     )
     post_id = Column(
         UUID(as_uuid=True), ForeignKey("post.id", ondelete="CASCADE"), primary_key=True
+    )
+    status = Column(
+        "status",
+        Enum(name="post_like_status_enum"),
+        nullable=False,
+        server_default=text("'ACT'::post_like_status_enum"),
     )
     post_like_user = relationship(
         "User", back_populates="post_likes", foreign_keys=[user_id]

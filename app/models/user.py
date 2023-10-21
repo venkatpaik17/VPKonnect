@@ -3,6 +3,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
+    Enum,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -15,13 +16,17 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.db_sqlalchemy import Base
-from app.models import comment
+from app.models import admin, auth, comment, post
 
 
 # orm model for user follow association table. Keeps track of user's followers and following
 class UserFollowAssociation(Base):
     __tablename__ = "user_follow_association"
-    status = Column(String(length=20), nullable=False)
+    id = Column(
+        "id", UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
+    )
+    # status = Column(String(length=20), nullable=False)
+    status = Column(Enum(name="user_follow_association_status_enum"), nullable=False)
     created_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
     )
@@ -47,7 +52,7 @@ class User(Base):
     )
     first_name = Column(String(length=50), nullable=False)
     last_name = Column(String(length=50), nullable=False)
-    username = Column(String(length=320), nullable=False, unique=True)
+    username = Column(String(length=30), nullable=False, unique=True)
     password = Column(String(length=65), nullable=False)
     email = Column(String(length=320), nullable=False, unique=True)
     date_of_birth = Column(Date, nullable=False)
@@ -61,16 +66,32 @@ class User(Base):
     gender = Column(String(length=1), nullable=False)
     bio = Column(String(length=150), nullable=True)
     country = Column(String(length=3), nullable=True)
+    # account_visibility = Column(
+    #     String(length=20), nullable=False, server_default=text("'public'")
+    # )
     account_visibility = Column(
-        String(length=20), nullable=False, server_default=text("'public'")
+        Enum(name="user_account_visibility_enum"),
+        nullable=False,
+        server_default=text("'PBC'::user_account_visibility_enum"),
     )
-    status = Column(String(length=20), nullable=False, server_default=text("'active'"))
-    type = Column(String(length=20), nullable=False, server_default=text("'standard'"))
+    # status = Column(String(length=20), nullable=False, server_default=text("'active'"))
+    status = Column(
+        Enum(name="user_status_enum"),
+        nullable=False,
+        server_default=text("'INA'::user_status_enum"),
+    )
+    # type = Column(String(length=20), nullable=False, server_default=text("'standard'"))
+    type = Column(
+        Enum(name="user_type_enum"),
+        nullable=False,
+        server_default=text("'STD'::user_type_enum"),
+    )
     is_deleted = Column(Boolean, nullable=False, server_default="False")
     created_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
     )
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
+    is_verified = Column(Boolean, nullable=False, server_default="False")
 
     followers = relationship(
         "UserFollowAssociation",
