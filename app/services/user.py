@@ -4,7 +4,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import user as user_model
-from app.utils import enum as enum_utils
 
 
 def get_user_by_username(
@@ -36,15 +35,11 @@ def get_user_by_email_query(
 
 
 def check_username_exists(username: str, db_session: Session):
-    return get_user_by_username_query(
-        username, [enum_utils.UserStatusEnum.DELETED], db_session
-    ).first()
+    return get_user_by_username_query(username, ["DEL"], db_session).first()
 
 
 def check_user_exists(email: str, db_session: Session):
-    return get_user_by_email_query(
-        email, [enum_utils.UserStatusEnum.DELETED], db_session
-    ).first()
+    return get_user_by_email_query(email, ["DEL"], db_session).first()
 
 
 # get the query for single user session entry
@@ -106,8 +101,8 @@ def check_deactivation_expiration_query(db_session: Session):
     return db_session.query(user_model.User).filter(
         user_model.User.status.in_(
             [
-                enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
-                enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+                "PDH",
+                "PDK",
             ]
         ),
         func.now() > user_model.User.updated_at + timedelta(days=30),

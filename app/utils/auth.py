@@ -186,7 +186,7 @@ def verify_user_verify_token(token: str):
         # set token payload object
         token_data = auth_schema.UserVerifyTokenPayload(
             email=user_email, token_id=token_id
-        )
+        )  # type: ignore
 
         # check token expiry
         if token_exp < datetime.now().timestamp():

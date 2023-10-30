@@ -1,5 +1,6 @@
 from sqlalchemy import (
     TIMESTAMP,
+    BigInteger,
     Boolean,
     Column,
     Enum,
@@ -27,8 +28,7 @@ class Post(Base):
     # image = Column(LargeBinary(length=20971520), nullable=False)
     image = Column(String, nullable=False)
     caption = Column(String(length=2200), nullable=True)
-    # status = Column(String(length=20), nullable=False)
-    status = Column(Enum(name="post_status_enum"), nullable=False)
+    status = Column(String(length=3), nullable=False)
     is_deleted = Column(Boolean, nullable=False, server_default="False")
     created_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
@@ -64,9 +64,9 @@ class PostLike(Base):
     )
     status = Column(
         "status",
-        Enum(name="post_like_status_enum"),
+        String(length=3),
         nullable=False,
-        server_default=text("'ACT'::post_like_status_enum"),
+        server_default=text("'ACT'"),
     )
     post_like_user = relationship(
         "User", back_populates="post_likes", foreign_keys=[user_id]
@@ -80,8 +80,8 @@ class PostActivity(Base):
     id = Column(
         UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
     )
-    total_likes = Column(Integer, nullable=False, server_default=text("0"))
-    total_comments = Column(Integer, nullable=False, server_default=text("0"))
+    total_likes = Column(BigInteger, nullable=False, server_default=text("0"))
+    total_comments = Column(BigInteger, nullable=False, server_default=text("0"))
     post_id = Column(
         UUID(as_uuid=True), ForeignKey("post.id", ondelete="CASCADE"), nullable=False
     )

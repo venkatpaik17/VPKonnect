@@ -1,8 +1,8 @@
 """add status as primary/composite key in user_follow_association table
 
-Revision ID: e66a2773aa45
-Revises: 
-Create Date: 2023-09-18 20:33:10.891176
+Revision ID: 0755ddd27255
+Revises: 782d45a772fc
+Create Date: 2023-10-30 10:22:09.663528
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "e66a2773aa45"
-down_revision: Union[str, None] = None
+revision: str = "0755ddd27255"
+down_revision: Union[str, None] = "782d45a772fc"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

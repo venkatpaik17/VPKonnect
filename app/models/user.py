@@ -3,7 +3,6 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
-    Enum,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -25,8 +24,7 @@ class UserFollowAssociation(Base):
     id = Column(
         "id", UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
     )
-    # status = Column(String(length=20), nullable=False)
-    status = Column(Enum(name="user_follow_association_status_enum"), nullable=False)
+    status = Column(String(length=3), nullable=False)
     created_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
     )
@@ -66,26 +64,11 @@ class User(Base):
     gender = Column(String(length=1), nullable=False)
     bio = Column(String(length=150), nullable=True)
     country = Column(String(length=3), nullable=True)
-    # account_visibility = Column(
-    #     String(length=20), nullable=False, server_default=text("'public'")
-    # )
     account_visibility = Column(
-        Enum(name="user_account_visibility_enum"),
-        nullable=False,
-        server_default=text("'PBC'::user_account_visibility_enum"),
+        String(length=3), nullable=False, server_default=text("'PBC'")
     )
-    # status = Column(String(length=20), nullable=False, server_default=text("'active'"))
-    status = Column(
-        Enum(name="user_status_enum"),
-        nullable=False,
-        server_default=text("'INA'::user_status_enum"),
-    )
-    # type = Column(String(length=20), nullable=False, server_default=text("'standard'"))
-    type = Column(
-        Enum(name="user_type_enum"),
-        nullable=False,
-        server_default=text("'STD'::user_type_enum"),
-    )
+    status = Column(String(length=3), nullable=False, server_default=text("'INA'"))
+    type = Column(String(length=3), nullable=False, server_default=text("'STD'"))
     is_deleted = Column(Boolean, nullable=False, server_default="False")
     created_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
@@ -98,7 +81,7 @@ class User(Base):
         back_populates="followed",
         primaryjoin=and_(
             id == UserFollowAssociation.followed_user_id,
-            UserFollowAssociation.status == "accepted",
+            UserFollowAssociation.status == "ACP",
         ),
     )
 
@@ -107,7 +90,7 @@ class User(Base):
         back_populates="follower",
         primaryjoin=and_(
             id == UserFollowAssociation.follower_user_id,
-            UserFollowAssociation.status == "accepted",
+            UserFollowAssociation.status == "ACP",
         ),
     )
     usernames = relationship("UsernameChangeHistory", back_populates="username_user")

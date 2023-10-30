@@ -28,7 +28,6 @@ from app.services import auth as auth_service
 from app.services import user as user_service
 from app.utils import auth as auth_utils
 from app.utils import email as email_utils
-from app.utils import enum as enum_utils
 from app.utils import image as image_utils
 from app.utils import password as password_utils
 
@@ -177,7 +176,7 @@ def create_user(
         # add the token to userverificationcodetoken table
         add_user_verify_token = auth_model.UserVerificationCodeToken(
             code_token_id=user_verify_token_id,
-            type=enum_utils.UserVerificationCodeTokenTypeEnum.USER_VERIFY,
+            type="USV",
             user_id=add_user.id,
         )
         db.add(add_user_verify_token)
@@ -217,16 +216,16 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
     user_query = user_service.get_user_by_email_query(
         token_claims.email,
         [
-            enum_utils.UserStatusEnum.ACTIVE,
-            enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
-            enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
-            enum_utils.UserStatusEnum.RESTRICTED_FULL,
-            enum_utils.UserStatusEnum.RESTRICTED_PARTIAL,
-            enum_utils.UserStatusEnum.TEMPORARY_BAN,
-            enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
-            enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
-            enum_utils.UserStatusEnum.PERMANENT_BAN,
-            enum_utils.UserStatusEnum.DELETED,
+            "ACT",
+            "DAH",
+            "DAK",
+            "RSF",
+            "RSP",
+            "TBN",
+            "PDH",
+            "PDK",
+            "PBN",
+            "DEL",
         ],
         db,
     )
@@ -239,7 +238,7 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
 
     # get the query to fetch all user verify token ids related to the user
     user_verify_token_ids_query = auth_service.get_user_verification_codes_tokens_query(
-        str(user.id), enum_utils.UserVerificationCodeTokenTypeEnum.USER_VERIFY, db
+        str(user.id), "USV", db
     )
 
     # check if token id of token got from request exists
@@ -272,7 +271,7 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
 
         # update is_verified to True, status to ACT in user
         user_query.update(
-            {"status": enum_utils.UserStatusEnum.ACTIVE, "is_verified": True},
+            {"status": "ACT", "is_verified": True},
             synchronize_session=False,
         )
 
@@ -302,17 +301,15 @@ def reset_password(
 ):
     reset_user = user_schema.UserPasswordReset(email=user_email)
     # check if user is valid using email
-    user = user_service.get_user_by_email(
-        reset_user.email, [enum_utils.UserStatusEnum.DELETED], db
-    )
+    user = user_service.get_user_by_email(reset_user.email, ["DEL"], db)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     if user.status in [
-        enum_utils.UserStatusEnum.TEMPORARY_BAN,
-        enum_utils.UserStatusEnum.PERMANENT_BAN,
+        "TBN",
+        "PBN",
     ]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -346,7 +343,7 @@ def reset_password(
     # add the token id to user password reset token table
     add_reset_token_id = auth_model.UserVerificationCodeToken(
         code_token_id=reset_token_id,
-        type=enum_utils.UserVerificationCodeTokenTypeEnum.PASSWORD_RESET,
+        type="PWR",
         user_id=user.id,
     )
     db.add(add_reset_token_id)
@@ -389,9 +386,7 @@ def change_password_reset(
         )
 
     # get the user
-    user_query = user_service.get_user_by_email_query(
-        token_claims.email, [enum_utils.UserStatusEnum.DELETED], db
-    )
+    user_query = user_service.get_user_by_email_query(token_claims.email, ["DEL"], db)
     user = user_query.first()
     if not user:
         raise HTTPException(
@@ -399,8 +394,8 @@ def change_password_reset(
         )
 
     if user.status in [
-        enum_utils.UserStatusEnum.TEMPORARY_BAN,
-        enum_utils.UserStatusEnum.PERMANENT_BAN,
+        "TBN",
+        "PBN",
     ]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -411,7 +406,7 @@ def change_password_reset(
     user_password_reset_tokens_query = (
         auth_service.get_user_verification_codes_tokens_query(
             str(user.id),
-            enum_utils.UserVerificationCodeTokenTypeEnum.PASSWORD_RESET,
+            "PWR",
             db,
         )
     )
@@ -479,9 +474,7 @@ def change_password_update(
     )
 
     # get the user using username
-    user_query = user_service.get_user_by_username_query(
-        username, [enum_utils.UserStatusEnum.DELETED], db
-    )
+    user_query = user_service.get_user_by_username_query(username, ["DEL"], db)
 
     user = user_query.first()
     if not user:
@@ -490,18 +483,18 @@ def change_password_update(
         )
 
     if user.status in [
-        enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
-        enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
-        enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
-        enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
     ]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found"
         )
 
     if user.status in [
-        enum_utils.UserStatusEnum.TEMPORARY_BAN,
-        enum_utils.UserStatusEnum.PERMANENT_BAN,
+        "TBN",
+        "PBN",
     ]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -572,7 +565,7 @@ def follow_user(
     # get the user to be followed
     user_followed = user_service.get_user_by_username(
         followed_user.username,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
     if not user_followed:
@@ -582,10 +575,10 @@ def follow_user(
         )
 
     if user_followed.status in [
-        enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
-        enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
-        enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
-        enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
     ]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -595,7 +588,7 @@ def follow_user(
     # get follower user
     follower_user = user_service.get_user_by_email(
         current_user.email,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
 
@@ -622,12 +615,12 @@ def follow_user(
             )
 
         # if user is private then send request orelse follow directly
-        if user_followed.account_visibility == enum_utils.UserAccountVisibilityEnum.PRIVATE:  # type: ignore
+        if user_followed.account_visibility == "PRV":  # type: ignore
             # check if follow request already sent
             check_request_sent = user_service.get_user_follow_association_entry_query(
                 str(follower_user.id),
                 str(user_followed.id),
-                enum_utils.UserFollowAssociationStatusEnum.PENDING,
+                "PND",
                 db,
             )
             if check_request_sent.first():
@@ -637,7 +630,7 @@ def follow_user(
                 )
 
             follow_request = user_model.UserFollowAssociation(
-                status=enum_utils.UserFollowAssociationStatusEnum.PENDING,
+                status="PND",
                 follower=follower_user,
                 followed=user_followed,
             )
@@ -647,7 +640,7 @@ def follow_user(
             return {"message": f"Follow request sent to {followed_user.username}"}
         else:
             follow = user_model.UserFollowAssociation(
-                status=enum_utils.UserFollowAssociationStatusEnum.ACCEPTED,
+                status="ACP",
                 follower=follower_user,
                 followed=user_followed,
             )
@@ -669,7 +662,7 @@ def follow_user(
         user_follow_query = user_service.get_user_follow_association_entry_query(
             str(follower_user.id),
             str(user_followed.id),
-            enum_utils.UserFollowAssociationStatusEnum.ACCEPTED,
+            "ACP",
             db,
         )
         if not user_follow_query.first():
@@ -680,7 +673,7 @@ def follow_user(
 
         # update the status to unfollowed
         user_follow_query.update(
-            {"status": enum_utils.UserFollowAssociationStatusEnum.UNFOLLOWED},
+            {"status": "UNF"},
             synchronize_session=False,
         )
         db.commit()
@@ -704,7 +697,7 @@ def manage_follow_request(
     # check for user using username
     follower_user = user_service.get_user_by_username(
         username,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
     if not follower_user:
@@ -712,10 +705,10 @@ def manage_follow_request(
             status_code=status.HTTP_404_NOT_FOUND, detail="Follower user not found"
         )
     if follower_user.status in [
-        enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
-        enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
-        enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
-        enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
     ]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -725,7 +718,7 @@ def manage_follow_request(
     # get current user object
     user = user_service.get_user_by_email(
         current_user.email,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
 
@@ -733,7 +726,7 @@ def manage_follow_request(
     user_follow_query = user_service.get_user_follow_association_entry_query(
         str(follower_user.id),
         str(user.id),
-        enum_utils.UserFollowAssociationStatusEnum.PENDING,
+        "PND",
         db,
     )
     if not user_follow_query.first():
@@ -745,7 +738,7 @@ def manage_follow_request(
     if follow_request.action == "accept":
         user_follow_query.update(
             {
-                "status": enum_utils.UserFollowAssociationStatusEnum.ACCEPTED,
+                "status": "ACP",
                 "follower_user_id": follower_user.id,
                 "followed_user_id": user.id,
             },
@@ -759,7 +752,7 @@ def manage_follow_request(
     elif follow_request.action == "reject":
         user_follow_query.update(
             {
-                "status": enum_utils.UserFollowAssociationStatusEnum.REJECTED,
+                "status": "REJ",
                 "follower_user_id": follower_user.id,
                 "followed_user_id": user.id,
             },
@@ -784,7 +777,7 @@ def get_user_followers_following(
     # get user from username
     user = user_service.get_user_by_username(
         username,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
     if not user:
@@ -792,10 +785,10 @@ def get_user_followers_following(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     if user.status in [
-        enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
-        enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
-        enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
-        enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
     ]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -805,7 +798,7 @@ def get_user_followers_following(
     # get current user
     curr_auth_user = user_service.get_user_by_email(
         str(current_user.email),
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
 
@@ -814,7 +807,7 @@ def get_user_followers_following(
         str(curr_auth_user.id), str(user.id), db
     )
 
-    if (username != curr_auth_user.username) and (user.account_visibility == enum_utils.UserAccountVisibilityEnum.PRIVATE and not follower_check):  # type: ignore
+    if (username != curr_auth_user.username) and (user.account_visibility == "PRV" and not follower_check):  # type: ignore
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
@@ -912,7 +905,7 @@ def get_follow_requests(
     # get user from username
     user = user_service.get_user_by_username(
         username,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
     if not user:
@@ -920,10 +913,10 @@ def get_follow_requests(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     if user.status in [
-        enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
-        enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
-        enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
-        enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
     ]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -933,7 +926,7 @@ def get_follow_requests(
     # get current user
     curr_auth_user = user_service.get_user_by_email(
         current_user.email,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
 
@@ -946,7 +939,7 @@ def get_follow_requests(
 
     # get all follow requests
     user_follow_requests_entries = user_service.get_user_follow_requests(
-        str(user.id), enum_utils.UserFollowAssociationStatusEnum.PENDING, db
+        str(user.id), "PND", db
     )
 
     requests_user_ids = [
@@ -958,10 +951,10 @@ def get_follow_requests(
             user_model.User.id.in_(requests_user_ids),
             user_model.User.status.in_(
                 [
-                    enum_utils.UserStatusEnum.ACTIVE,
-                    enum_utils.UserStatusEnum.RESTRICTED_FULL,
-                    enum_utils.UserStatusEnum.RESTRICTED_PARTIAL,
-                    enum_utils.UserStatusEnum.TEMPORARY_BAN,
+                    "ACT",
+                    "RSF",
+                    "RSP",
+                    "TBN",
                 ]
             ),
         )
@@ -984,7 +977,7 @@ def username_change(
     # get user from username
     user_query = user_service.get_user_by_username_query(
         username,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
     user = user_query.first()
@@ -993,10 +986,10 @@ def username_change(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     if user.status in [
-        enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
-        enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
-        enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
-        enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
     ]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1071,7 +1064,7 @@ def soft_delete_user(
     # get user from username
     user_query = user_service.get_user_by_username_query(
         username,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
     user = user_query.first()
@@ -1081,10 +1074,10 @@ def soft_delete_user(
         )
 
     if user.status in [
-        enum_utils.UserStatusEnum.DEACTIVATED_HIDE,
-        enum_utils.UserStatusEnum.DEACTIVATED_KEEP,
-        enum_utils.UserStatusEnum.PENDING_DELETE_HIDE,
-        enum_utils.UserStatusEnum.PENDING_DELETE_KEEP,
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
     ]:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1103,7 +1096,7 @@ def soft_delete_user(
     # get current user
     curr_auth_user = user_service.get_user_by_email(
         current_user.email,
-        [enum_utils.UserStatusEnum.PERMANENT_BAN, enum_utils.UserStatusEnum.DELETED],
+        ["PBN", "DEL"],
         db,
     )
 
@@ -1127,12 +1120,12 @@ def soft_delete_user(
         # update status to pending_deletion_(hide/keep)
         if delete_request.hide_interactions:
             user_query.update(
-                {"status": enum_utils.UserStatusEnum.PENDING_DELETE_HIDE},
+                {"status": "PDH"},
                 synchronize_session=False,
             )
         else:
             user_query.update(
-                {"status": enum_utils.UserStatusEnum.PENDING_DELETE_KEEP},
+                {"status": "PDK"},
                 synchronize_session=False,
             )
         db.commit()

@@ -1,8 +1,8 @@
 """Add a new column 'id' to user_follow_association table and change the primary key to [id, follower_user_id, followed_user_id]
 
-Revision ID: bc55cfc696f3
-Revises: e66a2773aa45
-Create Date: 2023-09-20 11:37:48.424740
+Revision ID: 5b7b4d6c3267
+Revises: 0755ddd27255
+Create Date: 2023-10-30 10:23:06.829570
 
 """
 from typing import Sequence, Union
@@ -13,8 +13,8 @@ from sqlalchemy.dialects.postgresql import UUID
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "bc55cfc696f3"
-down_revision: Union[str, None] = "e66a2773aa45"
+revision: str = "5b7b4d6c3267"
+down_revision: Union[str, None] = "0755ddd27255"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

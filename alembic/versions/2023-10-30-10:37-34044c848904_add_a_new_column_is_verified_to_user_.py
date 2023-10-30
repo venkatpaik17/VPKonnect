@@ -1,24 +1,38 @@
-"""Change the type of specific columns like status, type to Enum from String to make sure only predefined strings are used
+"""Add a new column 'is_verified' to user table, change/update server defaults with updates strings, change string lengths, create a new table user_verification_code_token, copy existing data from user_password_reset_token to this new table, delete user_password_reset_token table
 
-Revision ID: 31274edd7054
-Revises: 8c9e77dfe9aa
-Create Date: 2023-10-09 09:53:07.131571
+Revision ID: 34044c848904
+Revises: 2628aa36e527
+Create Date: 2023-10-30 10:37:24.236365
 
 """
 from typing import Sequence, Union
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import UUID
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "31274edd7054"
-down_revision: Union[str, None] = "8c9e77dfe9aa"
+revision: str = "34044c848904"
+down_revision: Union[str, None] = "2628aa36e527"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # new column is_verified
+    op.add_column(
+        "user",
+        sa.Column("is_verified", sa.Boolean, nullable=False, server_default="False"),
+    )
+
+    # exisitng rows will have true
+    op.execute(
+        """
+               UPDATE "user" SET is_verified = TRUE
+        """
+    )
+
     # update the existing rows with new values
     op.execute(
         """
@@ -129,235 +143,212 @@ def upgrade() -> None:
         """
     )
 
-    # create enum types
-    op.execute(
-        "CREATE TYPE user_status_enum AS ENUM ('ACT', 'INA', 'RSP', 'RSF', 'DAH', 'DAK', 'PDH', 'PDK', 'TBN', 'PBN', 'DEL')"
-    )
-
-    op.execute("CREATE TYPE user_account_visibility_enum AS ENUM ('PBC', 'PRV')")
-
-    op.execute("CREATE TYPE user_type_enum AS ENUM ('STD', 'ADM')")
-
-    op.execute(
-        "CREATE TYPE post_status_enum AS ENUM ('PUB', 'DRF', 'HID', 'BAN', 'DEL')"
-    )
-
-    op.execute("CREATE TYPE post_like_status_enum AS ENUM ('ACT', 'HID', 'DEL')")
-
-    op.execute("CREATE TYPE comment_status_enum AS ENUM ('PUB', 'HID', 'BAN', 'DEL')")
-
-    op.execute("CREATE TYPE comment_like_status_enum AS ENUM ('ACT', 'HID', 'DEL')")
-
-    op.execute(
-        "CREATE TYPE user_follow_association_status_enum AS ENUM ('ACP', 'REJ', 'PND', 'UNF')"
-    )
-
-    op.execute("CREATE TYPE user_auth_track_status_enum AS ENUM ('ACT', 'EXP', 'INV')")
-
-    # drop the existing default value before setting new default enum value
-    op.execute("""ALTER TABLE "user" ALTER status DROP DEFAULT""")
-
-    op.execute("""ALTER TABLE "user" ALTER account_visibility DROP DEFAULT""")
-
-    op.execute("""ALTER TABLE "user" ALTER type DROP DEFAULT""")
-
-    op.execute("""ALTER TABLE post_like ALTER status DROP DEFAULT""")
-
-    op.execute("""ALTER TABLE "comment" ALTER status DROP DEFAULT""")
-
-    op.execute("""ALTER TABLE comment_like ALTER status DROP DEFAULT""")
-
-    op.execute("""ALTER TABLE user_auth_track ALTER status DROP DEFAULT""")
-
-    # change the types of columns to created enum types
+    # change string lengths and update defaults with new values (enums) wherever required
     op.alter_column(
         "user",
         "status",
         existing_type=sa.String(length=20),
-        type_=sa.Enum(name="user_status_enum"),
-        nullable=False,
-        server_default=sa.text("'ACT'::user_status_enum"),
-        postgresql_using="status::user_status_enum",
+        type_=sa.String(length=3),
+        server_default=sa.text("'INA'"),
     )
-
     op.alter_column(
         "user",
         "account_visibility",
         existing_type=sa.String(length=20),
-        type_=sa.Enum(name="user_account_visibility_enum"),
-        nullable=False,
-        server_default=sa.text("'PBC'::user_account_visibility_enum"),
-        postgresql_using="account_visibility::user_account_visibility_enum",
+        type_=sa.String(length=3),
+        server_default=sa.text("'PBC'"),
     )
-
     op.alter_column(
         "user",
         "type",
         existing_type=sa.String(length=20),
-        type_=sa.Enum(name="user_type_enum"),
-        nullable=False,
-        server_default=sa.text("'STD'::user_type_enum"),
-        postgresql_using="type::user_type_enum",
+        type_=sa.String(length=3),
+        server_default=sa.text("'STD'"),
     )
-
     op.alter_column(
         "post",
         "status",
         existing_type=sa.String(length=20),
-        type_=sa.Enum(name="post_status_enum"),
-        nullable=False,
-        postgresql_using="status::post_status_enum",
+        type_=sa.String(length=3),
     )
-
     op.alter_column(
         "post_like",
         "status",
         existing_type=sa.String(length=20),
-        type_=sa.Enum(name="post_like_status_enum"),
-        nullable=False,
-        server_default=sa.text("'ACT'::post_like_status_enum"),
-        postgresql_using="status::post_like_status_enum",
+        type_=sa.String(length=3),
+        server_default=sa.text("'ACT'"),
     )
-
     op.alter_column(
         "comment",
         "status",
         existing_type=sa.String(length=20),
-        type_=sa.Enum(name="comment_status_enum"),
-        nullable=False,
-        server_default=sa.text("'PUB'::comment_status_enum"),
-        postgresql_using="status::comment_status_enum",
+        type_=sa.String(length=3),
+        server_default=sa.text("'PUB'"),
     )
-
     op.alter_column(
         "comment_like",
         "status",
         existing_type=sa.String(length=20),
-        type_=sa.Enum(name="comment_like_status_enum"),
-        nullable=False,
-        server_default=sa.text("'ACT'::comment_like_status_enum"),
-        postgresql_using="status::comment_like_status_enum",
+        type_=sa.String(length=3),
+        server_default=sa.text("'ACT'"),
     )
-
     op.alter_column(
         "user_follow_association",
         "status",
         existing_type=sa.String(length=20),
-        type_=sa.Enum(name="user_follow_association_status_enum"),
-        nullable=False,
-        postgresql_using="status::user_follow_association_status_enum",
+        type_=sa.String(length=3),
     )
-
     op.alter_column(
         "user_auth_track",
         "status",
         existing_type=sa.String(length=20),
-        type_=sa.Enum(name="user_auth_track_status_enum"),
-        nullable=False,
-        server_default=sa.text("'ACT'::user_auth_track_status_enum"),
-        postgresql_using="status::user_auth_track_status_enum",
+        type_=sa.String(length=3),
+        server_default=sa.text("'ACT'"),
     )
+
+    # create user_verification_code_token table
+    op.create_table(
+        "user_verification_code_token",
+        sa.Column(
+            "id",
+            UUID(as_uuid=True),
+            unique=True,
+            nullable=False,
+            server_default=sa.func.generate_ulid(),
+        ),
+        sa.Column("code_token_id", sa.String(), primary_key=True),
+        sa.Column(
+            "type",
+            sa.String(length=3),
+            nullable=False,
+        ),
+        sa.Column(
+            "user_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("user.id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column("is_deleted", sa.Boolean, nullable=False, server_default="False"),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("NOW()"),
+        ),
+    )
+
+    # copy existing rows from user_password_reset_token
+    op.execute(
+        """
+            INSERT INTO user_verification_code_token (id, code_token_id, type, user_id, is_deleted, created_at)
+            SELECT id, reset_token_id, 'PWR', user_id, is_deleted, created_at
+            FROM user_password_reset_token
+        """
+    )
+
+    op.drop_table("user_password_reset_token")
 
 
 def downgrade() -> None:
-    # change column type back to string
+    # create user_reset_password_token table
+    op.create_table(
+        "user_password_reset_token",
+        sa.Column(
+            "id",
+            UUID(as_uuid=True),
+            unique=True,
+            nullable=False,
+            server_default=sa.func.generate_ulid(),
+        ),
+        sa.Column("reset_token_id", sa.String, primary_key=True),
+        sa.Column(
+            "user_id",
+            UUID(as_uuid=True),
+            sa.ForeignKey("user.id", ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column("is_deleted", sa.Boolean, nullable=False, server_default="False"),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("NOW()"),
+        ),
+    )
+
+    # copy rows from user_verification_code_token
+    op.execute(
+        """
+            INSERT INTO user_password_reset_token (id, reset_token_id, user_id, is_deleted, created_at)
+            SELECT id, code_token_id, user_id, is_deleted, created_at
+            FROM user_verification_code_token
+        """
+    )
+
+    op.drop_table("user_verification_code_token")
+
+    # change back to earlier defaults and string lengths
     op.alter_column(
         "user_auth_track",
         "status",
-        existing_type=sa.Enum(name="user_auth_track_status_enum"),
+        existing_type=sa.String(length=3),
         type_=sa.String(length=20),
-        nullable=False,
         server_default=sa.text("'active'"),
     )
-
     op.alter_column(
         "user_follow_association",
         "status",
-        existing_type=sa.Enum(name="user_follow_association_status_enum"),
+        existing_type=sa.String(length=3),
         type_=sa.String(length=20),
-        nullable=False,
     )
-
     op.alter_column(
         "comment_like",
         "status",
-        existing_type=sa.Enum(name="comment_like_status_enum"),
+        existing_type=sa.String(length=3),
         type_=sa.String(length=20),
-        nullable=False,
         server_default=sa.text("'active'"),
     )
-
     op.alter_column(
         "comment",
         "status",
-        existing_type=sa.Enum(name="comment_status_enum"),
+        existing_type=sa.String(length=3),
         type_=sa.String(length=20),
-        nullable=False,
         server_default=sa.text("'published'"),
     )
-
     op.alter_column(
         "post_like",
         "status",
-        existing_type=sa.Enum(name="post_like_status_enum"),
+        existing_type=sa.String(length=3),
         type_=sa.String(length=20),
-        nullable=False,
         server_default=sa.text("'active'"),
     )
-
     op.alter_column(
         "post",
         "status",
-        existing_type=sa.Enum(name="post_status_enum"),
+        existing_type=sa.String(length=3),
         type_=sa.String(length=20),
-        nullable=False,
     )
-
     op.alter_column(
         "user",
         "type",
-        existing_type=sa.Enum(name="user_type_enum"),
+        existing_type=sa.String(length=3),
         type_=sa.String(length=20),
-        nullable=False,
         server_default=sa.text("'standard'"),
     )
-
     op.alter_column(
         "user",
         "account_visibility",
-        existing_type=sa.Enum(name="user_account_visibility_enum"),
+        existing_type=sa.String(length=3),
         type_=sa.String(length=20),
-        nullable=False,
         server_default=sa.text("'public'"),
     )
-
     op.alter_column(
         "user",
         "status",
-        existing_type=sa.Enum(name="user_status_enum"),
+        existing_type=sa.String(length=3),
         type_=sa.String(length=20),
-        nullable=False,
         server_default=sa.text("'active'"),
     )
-
-    # drop all the created enum types
-    op.execute("DROP TYPE IF EXISTS user_auth_track_status_enum")
-
-    op.execute("DROP TYPE IF EXISTS user_follow_association_status_enum")
-
-    op.execute("DROP TYPE IF EXISTS comment_like_status_enum")
-
-    op.execute("DROP TYPE IF EXISTS comment_status_enum")
-
-    op.execute("DROP TYPE IF EXISTS post_like_status_enum")
-
-    op.execute("DROP TYPE IF EXISTS post_status_enum")
-
-    op.execute("DROP TYPE IF EXISTS user_type_enum")
-
-    op.execute("DROP TYPE IF EXISTS user_account_visibility_enum")
-
-    op.execute("DROP TYPE IF EXISTS user_status_enum")
 
     # update existing rows with old values
     op.execute(
@@ -373,7 +364,7 @@ def downgrade() -> None:
 
     op.execute(
         """
-            UPDATE user_follow_association 
+            UPDATE user_follow_association
             SET status = CASE
                 WHEN status='ACP' THEN 'accepted'
                 WHEN status='REJ' THEN 'rejected'
@@ -452,7 +443,7 @@ def downgrade() -> None:
 
     op.execute(
         """
-            UPDATE "user" 
+            UPDATE "user"
             SET status = CASE
                 WHEN status = 'ACT' THEN 'active'
                 WHEN status = 'INA' THEN 'inactive'
@@ -468,3 +459,6 @@ def downgrade() -> None:
             END
         """
     )
+
+    # drop is_verified column
+    op.drop_column("user", "is_verified")

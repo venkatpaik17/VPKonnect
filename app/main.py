@@ -19,7 +19,7 @@ if ENVIRONMENT not in SHOW_DOCS_ENVIRONMENT:
 
 # connection is established and model tables are created, only needed if using sqlalchemy for create operations. Not required if using alembic (DB Migr tool)
 # all the models are imported and Base instance is used
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
 app = FastAPI(**settings.fastapi_kwargs)
 

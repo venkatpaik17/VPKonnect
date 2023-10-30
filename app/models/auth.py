@@ -10,12 +10,7 @@ class UserAuthTrack(Base):
         UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
     )
     refresh_token_id = Column(String, nullable=False, unique=True)
-    # status = Column(String(length=20), nullable=False, server_default=text("'active'"))
-    status = Column(
-        Enum(name="user_auth_track_status_enum"),
-        nullable=False,
-        server_default=text("'ACT'::user_auth_track_status_enum"),
-    )
+    status = Column(String(length=3), nullable=False, server_default=text("'ACT'"))
     device_info = Column(String, nullable=False)
     created_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
@@ -53,8 +48,7 @@ class UserVerificationCodeToken(Base):
         server_default=func.generate_ulid(),
     )
     code_token_id = Column(String, primary_key=True)
-    # type = Column(String, nullable=False)
-    type = Column(Enum(name="user_verification_code_token_type_enum"), nullable=False)
+    type = Column(String(length=3), nullable=False)
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
     )

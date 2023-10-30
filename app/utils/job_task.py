@@ -10,6 +10,6 @@ def delete_user_after_deactivation_period_expiration(db: Session = next(get_db()
     users_to_be_delete = delete_entries_query.all()
     if users_to_be_delete:
         delete_entries_query.update(
-            {"status": "deleted", "is_deleted": True}, synchronize_session=False
+            {"status": "DEL", "is_deleted": True}, synchronize_session=False
         )
         db.commit()

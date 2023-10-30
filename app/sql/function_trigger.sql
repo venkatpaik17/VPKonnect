@@ -42,27 +42,27 @@ trigger upon update
 CREATE TRIGGER user_add_activity_detail_trigger
 AFTER UPDATE ON "user"
 FOR EACH ROW
-WHEN (OLD.status = 'INA'::user_status_enum AND NEW.status = 'ACT'::user_status_enum AND NEW.is_verified = TRUE)
+WHEN (OLD.status = 'INA' AND NEW.status = 'ACT' AND NEW.is_verified = TRUE)
 EXECUTE FUNCTION update_activity_detail('Users_Added');
 
 /*trigger upon status for deactivated, restored and deleted user*/
 CREATE TRIGGER user_deactivate_activity_detail_trigger
 AFTER UPDATE ON "user"
 FOR EACH ROW
-WHEN (NEW.status = 'PDH'::user_status_enum OR NEW.status = 'PDK'::user_status_enum)
+WHEN (NEW.status IN ('PDK', 'PDH', 'DAH', 'DAK'))
 EXECUTE FUNCTION update_activity_detail('Users_Deactivated');
 
 /*updating User_restored trigger*/
 CREATE TRIGGER user_active_activity_detail_trigger
 AFTER UPDATE ON "user"
 FOR EACH ROW
-WHEN ((OLD.status = 'PDK'::user_status_enum OR OLD.status = 'PDH'::user_status_enum OR OLD.status = 'DAH'::user_status_enum OR OLD.status = 'DAK'::user_status_enum) AND NEW.status = 'ACT'::user_status_enum)
+WHEN (OLD.status IN ('PDK', 'PDH', 'DAH', 'DAK') AND NEW.status = 'ACT')
 EXECUTE FUNCTION update_activity_detail('Users_Restored');
 
 CREATE TRIGGER user_delete_activity_detail_trigger
 AFTER UPDATE ON "user"
 FOR EACH ROW
-WHEN (NEW.status = 'DEL'::user_status_enum AND NEW.is_deleted = TRUE)
+WHEN (NEW.status = 'DEL' AND NEW.is_deleted = TRUE)
 EXECUTE FUNCTION update_activity_detail('Users_Deleted');
 
 
@@ -74,7 +74,7 @@ CREATE OR REPLACE FUNCTION update_user_auth_track()
 RETURNS TRIGGER AS $$
 BEGIN
     UPDATE user_auth_track 
-    SET status='INV'::user_auth_track_status_enum, updated_at = NOW()
+    SET status='INV', updated_at = NOW()
     WHERE user_id=OLD.user_id AND device_info=OLD.device_info;
    
     RETURN NULL;
@@ -99,6 +99,7 @@ EXECUTE FUNCTION update_user_auth_track();
 # If the action is 'delete', it updates all four tables with status 'deleted' and is_deleted = TRUE
 # If any interaction is deleted or removed by user then it should not be hidden or restored during hide/keep/unhide. i.e., if post, comment, post_like, comment_like 'status' is 'deleted' and is_deleted is TRUE then keep it as it is. No update.
 #updated to accommodate the enum
+#removed enum, but string values are kept as it is
 */
 CREATE OR REPLACE FUNCTION update_user_info_status()
 RETURNS TRIGGER AS $$
@@ -132,26 +133,26 @@ BEGIN
 
     END IF;
     
-    IF action = 'keep' OR (action = 'unhide' AND OLD.status = 'PDK'::user_status_enum) THEN
+    IF action = 'keep' OR (action = 'unhide' AND (OLD.status = 'PDK' OR OLD.status = 'DAK')) THEN
         -- Check if there are posts related to the user
         IF EXISTS (SELECT 1 FROM post WHERE user_id = user_id_param) THEN
             -- Update 'post' table
             UPDATE post
             SET status = CASE 
-                WHEN post.status = 'DEL'::post_status_enum THEN post.status::post_status_enum 
-                ELSE new_status::post_status_enum 
+                WHEN post.status = 'DEL'THEN post.status
+                ELSE new_status
                 END
             WHERE user_id = user_id_param;
         END IF;
         
-    ELSIF action = 'hide' OR (action = 'unhide' AND OLD.status = 'PDH'::user_status_enum) OR action = 'delete' THEN
+    ELSIF action = 'hide' OR (action = 'unhide' AND (OLD.status = 'PDH' OR OLD.status = 'DAH')) OR action = 'delete' THEN
         -- Check if there are posts related to the user
         IF EXISTS (SELECT 1 FROM post WHERE user_id = user_id_param) THEN
             -- Update 'post' table
             UPDATE post
             SET status = CASE 
-                WHEN post.status = 'DEL'::post_status_enum THEN post.status::post_status_enum 
-                ELSE new_status::post_status_enum 
+                WHEN post.status = 'DEL' THEN post.status
+                ELSE new_status
                 END, 
                 is_deleted = CASE 
                 WHEN action = 'delete' OR post.is_deleted = TRUE THEN new_is_deleted 
@@ -165,8 +166,8 @@ BEGIN
             -- Update 'comment' table
             UPDATE comment
             SET status = CASE 
-                WHEN comment.status = 'DEL'::comment_status_enum THEN comment.status::comment_status_enum 
-                ELSE new_status::comment_status_enum 
+                WHEN comment.status = 'DEL' THEN comment.status 
+                ELSE new_status
                 END, 
                 is_deleted = CASE 
                 WHEN action = 'delete' OR comment.is_deleted = TRUE THEN new_is_deleted 
@@ -180,9 +181,9 @@ BEGIN
             -- Update 'post_like' table
             UPDATE post_like
             SET status = CASE 
-                WHEN post_like.status = 'DEL'::post_like_status_enum THEN post_like.status::post_like_status_enum 
-                WHEN action = 'unhide' THEN 'ACT'::post_like_status_enum 
-                ELSE new_status::post_like_status_enum
+                WHEN post_like.status = 'DEL' THEN post_like.status 
+                WHEN action = 'unhide' THEN 'ACT' 
+                ELSE new_status
                 END, 
                 is_deleted = CASE 
                 WHEN action = 'delete' OR post_like.is_deleted = TRUE THEN new_is_deleted 
@@ -196,9 +197,9 @@ BEGIN
             -- Update 'comment_like' table
             UPDATE comment_like
             SET status = CASE 
-                WHEN comment_like.status = 'DEL'::comment_like_status_enum THEN comment_like.status::comment_like_status_enum 
-                WHEN action = 'unhide' THEN 'ACT'::comment_like_status_enum 
-                ELSE new_status::comment_like_status_enum
+                WHEN comment_like.status = 'DEL' THEN comment_like.status 
+                WHEN action = 'unhide' THEN 'ACT' 
+                ELSE new_status
                 END, 
                 is_deleted = CASE 
                 WHEN action = 'delete' OR comment_like.is_deleted = TRUE THEN new_is_deleted 
@@ -215,23 +216,23 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER user_delete_status_hide_trigger
 AFTER UPDATE ON "user"
 FOR EACH ROW
-WHEN (NEW.status = 'PDH'::user_status_enum)
+WHEN (NEW.status = 'PDH' OR NEW.status = 'DAH')
 EXECUTE FUNCTION update_user_info_status('hide');
 
 CREATE TRIGGER user_delete_status_keep_trigger
 AFTER UPDATE ON "user"
 FOR EACH ROW
-WHEN (NEW.status = 'PDK'::user_status_enum)
+WHEN (NEW.status = 'PDK' OR NEW.status = 'DAK')
 EXECUTE FUNCTION update_user_info_status('keep');
 
 CREATE TRIGGER user_delete_status_unhide_trigger
 AFTER UPDATE ON "user"
 FOR EACH ROW
-WHEN (NEW.status = 'ACT'::user_status_enum)
+WHEN (OLD.status <> 'INA' AND NEW.status = 'ACT')
 EXECUTE FUNCTION update_user_info_status('unhide');
 
 CREATE TRIGGER user_delete_status_delete_trigger
 AFTER UPDATE ON "user"
 FOR EACH ROW
-WHEN (NEW.status = 'DEL'::user_status_enum AND NEW.is_deleted = TRUE)
+WHEN (NEW.status = 'DEL' AND NEW.is_deleted = TRUE)
 EXECUTE FUNCTION update_user_info_status('delete');
