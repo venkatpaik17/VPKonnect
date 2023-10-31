@@ -157,7 +157,7 @@ Table: "user_auth_track"
     updated_at (Timestamp, Nullable)
     user_id (UUID, Not Null)
 
-Table: "user_password_reset_token"
+Table: "user_password_reset_token" (Not used now, replaced with user_verification_code_token)
 
     id (UUID, Unique, Not Null)
     reset_token_id (String, Primary Key, Not Null)
@@ -226,7 +226,7 @@ POST {URL}/users/password/change
 ```
 POST {URL}/users/{username}/password/change
 ```
-- User Follow/Unfollow (Done)
+- User Follow/Unfollow <sup>#</sup>
 ```
 POST {URL}/users/follow
 ```
