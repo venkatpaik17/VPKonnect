@@ -57,9 +57,9 @@ Table: "user"
     gender (String, Length: 1, Not Null)
     bio (String, Length: 150, Nullable)
     country (String, Length: 3, Nullable)
-    account_visibility (Enum, Not Null)
-    status (Enum, Not Null)
-    type (Enum, Not Null)
+    account_visibility (String, Length: 3, Not Null)
+    status (String, Length: 3, Not Null)
+    type (String, Length: 3, Not Null)
     is_deleted (Boolean, Not Null)
     created_at (Timestamp, Not Null)
     updated_at (Timestamp, Nullable)
@@ -68,7 +68,7 @@ Table: "user"
 Table: "user_follow_association"
 
     id (UUID, Primary Key, Not Null)
-    status (Enum, Not Null)
+    status (String, Length: 3, Not Null)
     created_at (Timestamp, Not Null)
     follower_user_id (UUID, Primary Key, Not Null)
     followed_user_id (UUID, Primary Key, Not Null)
