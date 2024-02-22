@@ -25,6 +25,7 @@ class RefreshTokenPayload(AccessTokenPayload):
 class UserLogout(BaseModel):
     username: str
     action: str
+    flow: str
 
 
 class ResetTokenPayload(BaseModel):
@@ -34,3 +35,14 @@ class ResetTokenPayload(BaseModel):
 
 class UserVerifyTokenPayload(ResetTokenPayload):
     pass
+
+
+class EmployeeLogin(BaseModel):
+    username: EmailStr | str
+    password: str
+    device_info: str
+
+
+class EmployeeLogout(BaseModel):
+    emp_id: str
+    action: str

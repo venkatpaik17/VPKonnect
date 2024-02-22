@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 from cachetools import TTLCache, keys
@@ -278,10 +279,10 @@ def verify_refresh_token(refresh_token: str):
             token_id=token_id,
         )
 
+        print(token_exp)
+        print(datetime.now().timestamp())
         # check the exp, epoch comparision. token_exp is epoch timezone specific. So we use now() for current time
         if token_exp < datetime.now().timestamp():
-            # blacklist the token if expired
-            blacklist_token(token_data.token_id)
             # return the token data with false flag
             return (token_data, False)
     # other errors
@@ -311,3 +312,105 @@ def get_current_user(
     access_token_data = verify_access_token(access_token)
 
     return access_token_data
+
+
+# access_roles dict
+access_roles = {
+    "management": ["CEO", "CTO", "CMO", "CSO", "CFO", "COO"],
+    "software_dev": [
+        "SDE1F",
+        "SDE2F",
+        "SDE3F",
+        "SDE4F",
+        "SDE1B",
+        "SDE2B",
+        "SDE3B",
+        "SDE4B",
+        "SDET1",
+        "SDET2",
+        "SDET3",
+        "SDET4",
+        "SDM1F",
+        "SDM2F",
+        "SDM1B",
+        "SDM2B",
+    ],
+    "content_mgmt": ["CNM", "CMM", "UOA"],
+    "busn_govt_user": ["BUS", "GOV"],
+    "std_ver_user": ["STD", "VER"],
+    "user": ["STD", "VER", "BUS", "GOV"],
+    "employee": [
+        "CEO",
+        "CTO",
+        "CMO",
+        "CSO",
+        "CFO",
+        "COO",
+        "SDE1F",
+        "SDE2F",
+        "SDE3F",
+        "SDE4F",
+        "SDE1B",
+        "SDE2B",
+        "SDE3B",
+        "SDE4B",
+        "SDET1",
+        "SDET2",
+        "SDET3",
+        "SDET4",
+        "SDM1F",
+        "SDM2F",
+        "SDM1B",
+        "SDM2B",
+        "CNM",
+        "CMM",
+        "UOA",
+    ],
+}
+
+
+# custom dependency to handle access roles
+class AccessRoleDependency:
+    def __init__(self, role: str):
+        self.role = role
+
+    def __call__(
+        self, current_user: auth_schema.AccessTokenPayload = Depends(get_current_user)
+    ):
+        type_desgn = current_user.type
+        if type_desgn not in access_roles[self.role]:
+            print("1")
+            print(type_desgn)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to perform requested action",
+            )
+
+        return current_user
+
+
+# def get_current_admin(access_token: str = Depends(oauth2_scheme)):
+#     access_token_data = get_current_user(access_token)
+#     if access_token_data.type != "ADM":
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Could not validate credentials",
+#             headers={"WWW-Authenticate": "Bearer"},
+#         )
+
+#     return access_token_data
+
+
+# # check the role to grant access
+# can't use this because it is not possible to send params through Depends
+# def check_access_role(
+#     role: str, current_user: auth_schema.AccessTokenPayload = Depends(get_current_user)
+# ):
+#     type_desgn = current_user.type
+#     if type_desgn not in access_roles[role]:
+#         raise HTTPException(
+#             status_code=status.HTTP_403_FORBIDDEN,
+#             detail="Not authorized to perform requested action",
+#         )
+
+#     return current_user

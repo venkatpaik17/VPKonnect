@@ -56,3 +56,30 @@ class UserVerificationCodeToken(Base):
     created_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
     )
+
+
+class EmployeeAuthTrack(Base):
+    __tablename__ = "employee_auth_track"
+    id = Column(
+        UUID(as_uuid=True), server_default=func.generate_ulid(), primary_key=True
+    )
+    refresh_token_id = Column(String(), nullable=False, unique=True)
+    status = Column(
+        String(length=20),
+        server_default=text("'ACT'"),
+        nullable=False,
+    )
+    device_info = Column(String(), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True), server_default=text("NOW()"), nullable=False
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        onupdate=func.now(),
+    )
+    employee_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("employee.id", ondelete="CASCADE"),
+        nullable=False,
+    )

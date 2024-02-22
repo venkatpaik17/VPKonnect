@@ -41,3 +41,35 @@ def get_user_verification_codes_tokens_query(
         auth_model.UserVerificationCodeToken.user_id == user_id,
         auth_model.UserVerificationCodeToken.type == _type,
     )
+
+
+# get the query for employee auth track entry
+def get_employee_auth_track_entry_by_token_id_query(
+    token_id: str, status: str, db_session: Session
+):
+    return db_session.query(auth_model.EmployeeAuthTrack).filter(
+        auth_model.EmployeeAuthTrack.refresh_token_id == token_id,
+        auth_model.EmployeeAuthTrack.status == status,
+    )
+
+
+def check_refresh_token_id_in_employee_auth_track(
+    token_id: str, status: str, db_session: Session
+):
+    return get_employee_auth_track_entry_by_token_id_query(
+        token_id, status, db_session
+    ).first()
+
+
+# get all employee auth track entries using employee id
+def get_all_employee_auth_track_entries_by_employee_id(
+    employee_id: str, status: str, db_session: Session
+):
+    return (
+        db_session.query(auth_model.EmployeeAuthTrack)
+        .filter(
+            auth_model.EmployeeAuthTrack.employee_id == employee_id,
+            auth_model.EmployeeAuthTrack.status == status,
+        )
+        .all()
+    )

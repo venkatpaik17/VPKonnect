@@ -33,11 +33,13 @@ class UserAccountVisibilityEnum(str, Enum):
 
 class UserTypeEnum(str, Enum):
     """
-    Enum for user type values 'standard', 'admin'
+    Enum for user type values 'standard', 'verified', 'business', 'government'
     """
 
     STANDARD = "STD"
-    ADMIN = "ADM"
+    VERIFIED = "VER"
+    BUSINESS = "BUS"
+    GOVERNMENT = "GOV"
 
 
 class PostStatusEnum(str, Enum):
@@ -92,6 +94,9 @@ class UserFollowAssociationStatusEnum(str, Enum):
     REJECTED = "REJ"
     PENDING = "PND"
     UNFOLLOWED = "UNF"
+    REMOVED = "RMV"
+    HIDDEN = "HID"
+    DELETED = "DEL"
 
 
 class UserAuthTrackStatusEnum(str, Enum):
@@ -112,3 +117,84 @@ class UserVerificationCodeTokenTypeEnum(str, Enum):
     PASSWORD_RESET = "PWR"
     USER_VERIFY = "USV"
     BAN_VERIFY = "BNV"
+
+
+class UserContentReportDetailStatusEnum(str, Enum):
+    """
+    Enum for usercontentreportdetail status values 'open', 'under_review', 'closed', 'resolved'
+    """
+
+    OPEN = "OPN"
+    UNDER_REVIEW = "URV"
+    CLOSED = "CSD"
+    RESOLVED = "RSD"
+
+
+class EmployeeStatusEnum(str, Enum):
+    """
+    Enum for employee status values 'active_regular', 'active_probationary', 'inactive', 'terminated', 'suspended'
+    """
+
+    ACTIVE_REGULAR = "ACR"
+    ACTIVE_PROBATIONARY = "ACP"
+    INACTIVE = "INA"
+    TERMINATED = "TER"
+    SUSPENDED = "SUP"
+
+
+class EmployeeTypeEnum(str, Enum):
+    """
+    Enum for employee type values 'full_time_employee', 'part_time_employee', 'contract_employee'
+    """
+
+    FULL_TIME_EMPLOYEE = "FTE"
+    PART_TIME_EMPLOYEE = "PTE"
+    CONTRACT_EMPLOYEE = "CTE"
+
+
+class EmployeeAuthTrackStatusEnum(str, Enum):
+    """
+    Enum for employeeauthtrack status values 'active', 'expired', 'invalid'
+    """
+
+    ACTIVE = "ACT"
+    EXPIRED = "EXP"
+    INVALID = "INV"
+
+
+class EmployeeDesignationEnum(str, Enum):
+    """
+    Enum for employee designation values 'chief_executive_officer', 'chief_technology_officer', 'chief_sales_officer',
+    'chief_marketing_officer', 'chief_financial_officer', 'chief_operating_officer', 'software_development_engineer_1_frontend',
+    'software_development_engineer_2_frontend', 'software_development_engineer_3_frontend', 'software_development_engineer_4_frontend',
+    'software_development_engineer_1_backend', 'software_development_engineer_2_backend', 'software_development_engineer_3_backend',
+    'software_development_engineer_4_backend', 'software_development_engineer_test_1', 'software_development_engineer_test_2',
+    'software_development_engineer_test_3', 'software_development_engineer_test_4', 'content_moderator', 'community_moderator',
+    'user_operations_analyst'
+    """
+
+    CHIEF_EXECUTIVE_OFFICER = "CEO"
+    CHIEF_TECHNOLOGY_OFFICER = "CTO"
+    CHIEF_SALES_OFFICER = "CSO"
+    CHIEF_MARKETING_OFFICER = "CMO"
+    CHIEF_FINANCIAL_OFFICER = "CFO"
+    CHIEF_OPERATING_OFFICER = "COO"
+    SOFTWARE_DEVELOPMENT_ENGINEER_1_FRONTEND = "SDE1F"
+    SOFTWARE_DEVELOPMENT_ENGINEER_2_FRONTEND = "SDE2F"
+    SOFTWARE_DEVELOPMENT_ENGINEER_3_FRONTEND = "SDE3F"
+    SOFTWARE_DEVELOPMENT_ENGINEER_4_FRONTEND = "SDE4F"
+    SOFTWARE_DEVELOPMENT_MANAGER_1_FRONTEND = "SDM1F"
+    SOFTWARE_DEVELOPMENT_MANAGER_2_FRONTEND = "SDM2F"
+    SOFTWARE_DEVELOPMENT_ENGINEER_1_BACKEND = "SDE1B"
+    SOFTWARE_DEVELOPMENT_ENGINEER_2_BACKEND = "SDE2B"
+    SOFTWARE_DEVELOPMENT_ENGINEER_3_BACKEND = "SDE3B"
+    SOFTWARE_DEVELOPMENT_ENGINEER_4_BACKEND = "SDE3B"
+    SOFTWARE_DEVELOPMENT_MANAGER_1_BACKEND = "SDM1B"
+    SOFTWARE_DEVELOPMENT_MANAGER_2_BACKEND = "SDM2B"
+    SOFTWARE_DEVELOPMENT_ENGINEER_TEST_1 = "SDET1"
+    SOFTWARE_DEVELOPMENT_ENGINEER_TEST_2 = "SDET2"
+    SOFTWARE_DEVELOPMENT_ENGINEER_TEST_3 = "SDET3"
+    SOFTWARE_DEVELOPMENT_ENGINEER_TEST_4 = "SDET4"
+    CONTENT_MODERATOR = "CNM"
+    COMMUNITY_MODERATOR = "CMM"
+    USER_OPERATIONS_ANALYST = "UOA"

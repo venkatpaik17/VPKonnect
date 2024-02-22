@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.db_sqlalchemy import Base
-from app.models import admin, auth, comment, post
+from app.models import admin, auth, comment, employee, post
 
 
 # orm model for user follow association table. Keeps track of user's followers and following
@@ -75,6 +75,11 @@ class User(Base):
     )
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
     is_verified = Column(Boolean, nullable=False, server_default="False")
+    repr_id = Column(
+        UUID(as_uuid=True),
+        nullable=False,
+        server_default=func.gen_random_uuid(),
+    )
 
     followers = relationship(
         "UserFollowAssociation",

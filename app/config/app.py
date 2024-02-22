@@ -16,7 +16,7 @@ class AppSettings(BaseAppSettings):
     redoc_url: str | None = "/redoc"
     title: str = "VPKonnect FastAPI application"
     version: str = "0.1.0"
-    api_v0_prefix: str = "/api/v0"
+    api_prefix: str = "/api/v0"
 
     database_name: str
     database_username: str

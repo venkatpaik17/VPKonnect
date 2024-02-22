@@ -19,30 +19,59 @@ from sqlalchemy.orm import Session
 
 from app.config.app import settings
 from app.db.session import get_db
+from app.models import admin as admin_model
 from app.models import auth as auth_model
 from app.models import user as user_model
 from app.schemas import admin as admin_schema
 from app.schemas import auth as auth_schema
 from app.schemas import user as user_schema
 from app.services import auth as auth_service
+from app.services import comment as comment_service
+from app.services import post as post_service
 from app.services import user as user_service
 from app.utils import auth as auth_utils
 from app.utils import email as email_utils
 from app.utils import image as image_utils
 from app.utils import password as password_utils
 
-router = APIRouter(prefix="/users", tags=["Users"])
+router = APIRouter(prefix=settings.api_prefix + "/users", tags=["Users"])
 
 MAX_SIZE = 5 * 1024 * 1024
 
 
-@router.post("/register")
+@router.post("/register", status_code=status.HTTP_201_CREATED)
 def create_user(
     background_tasks: BackgroundTasks,
     request: user_schema.UserRegister = FormDepends(user_schema.UserRegister),  # type: ignore
     db: Session = Depends(get_db),
     image: UploadFile | None = None,
 ):
+    # check if user registered but unverified
+    unverified_user_query = user_service.get_user_by_email_query(
+        request.email,
+        [
+            "ACT",
+            "DAH",
+            "DAK",
+            "RSF",
+            "RSP",
+            "TBN",
+            "PDH",
+            "PDK",
+            "PBN",
+            "DEL",
+        ],
+        db,
+    )
+    unverified_user = unverified_user_query.filter(
+        user_model.User.is_verified == False
+    ).first()
+    if unverified_user:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"User with {unverified_user.email} already registered. Verification Pending.",
+        )
+
     # check both entered passwords are same
     if request.password != request.confirm_password:
         raise HTTPException(
@@ -120,13 +149,13 @@ def create_user(
             db.flush()
 
             # create a subfolder for user specific uploads, if folder exists get it.
-            user_subfolder = image_utils.get_or_create_user_image_subfolder(
-                str(add_user.id)
+            user_subfolder = image_utils.get_or_create_entity_image_subfolder(
+                "user", str(add_user.repr_id)
             )
 
             # create a subfolder for profile images, if folder exists get it.
-            profile_subfolder = image_utils.get_or_create_user_profile_image_subfolder(
-                user_subfolder
+            profile_subfolder = (
+                image_utils.get_or_create_entity_profile_image_subfolder(user_subfolder)
             )
 
             image_path = profile_subfolder / image_name
@@ -197,6 +226,106 @@ def create_user(
     return {
         "message": f"User registration verification process - An email has been sent to {add_user.email} for verification."
     }
+
+
+@router.post("/send-verify-email")
+def send_verification_email_user(
+    email_user_request: user_schema.UserSendEmail,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    # get the user
+    user = user_service.get_user_by_email(email_user_request.email, ["DEL"], db)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # check the type and accordingly set parameters
+    if email_user_request.type == "USV":
+        if user.status in [
+            "ACT",
+            "DAH",
+            "DAK",
+            "RSF",
+            "RSP",
+            "TBN",
+            "PDH",
+            "PDK",
+            "PBN",
+        ]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unable to process your request at this time.",
+            )
+
+        # generate a token
+        claims = {"sub": user.email, "role": user.type}
+        user_token, token_id = auth_utils.create_user_verify_token(claims)
+
+        # generate verification link
+        verify_link = f"https://vpkonnect.in/accounts/signup/verify/?token={user_token}"
+        email_subject = "VPKonnect - User Verification - Account Signup"
+        email_details = admin_schema.SendEmail(
+            template="user_account_signup_verification.html",
+            email=[EmailStr(email_user_request.email)],
+            body_info={
+                "first_name": user.first_name,
+                "link": verify_link,
+            },
+        )
+        return_message = f"User registration verification process - An email has been sent to {user.email} for verification."
+
+    elif email_user_request.type == "PWR":
+        if user.status in [
+            "TBN",
+            "PBN",
+        ]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Unable to process your request at this time. Please contact support for assistance.",
+            )
+
+        # generate token
+        claims = {"sub": user.email, "role": user.type}
+        user_token, token_id = auth_utils.create_reset_token(claims)
+
+        # generate reset link
+        reset_link = (
+            f"https://vpkonnect.in/accounts/password/change/?token={user_token}"
+        )
+
+        email_subject = "VPKonnect - Password Reset Request"
+        email_details = admin_schema.SendEmail(
+            template="password_reset_email.html",
+            email=[EmailStr(user.email)],
+            body_info={"username": user.username, "link": reset_link},
+        )
+        return_message = f"An email will be sent to {user.email} if an account is registered under it."
+
+    try:
+        email_utils.send_email(email_subject, email_details, background_tasks)
+        # add the token to userverificationcodetoken table
+        add_user_token = auth_model.UserVerificationCodeToken(
+            code_token_id=token_id,
+            type="USV",
+            user_id=user.id,
+        )
+        db.add(add_user_token)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing email request",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error sending email.",
+        ) from exc
+
+    return {"message": return_message}
 
 
 @router.post("/register/verify", response_model=user_schema.UserVerifyResponse)
@@ -274,6 +403,12 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
             {"status": "ACT", "is_verified": True},
             synchronize_session=False,
         )
+
+        # create an entry in guidelines_violation_score
+        add_guideline_violation_score = admin_model.GuidelineViolationScore(
+            user_id=user.id
+        )
+        db.add(add_guideline_violation_score)
 
         db.commit()
         db.refresh(user)
@@ -465,7 +600,9 @@ def change_password_update(
     new_password: str = Form(),
     confirm_new_password: str = Form(),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
 ):
     update = user_schema.UserPasswordChangeUpdate(
         old_password=old_password,
@@ -560,7 +697,9 @@ def change_password_update(
 def follow_user(
     followed_user: user_schema.UserFollow,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
 ):
     # get the user to be followed
     user_followed = user_service.get_user_by_username(
@@ -692,7 +831,9 @@ def manage_follow_request(
     username: str,
     follow_request: user_schema.UserFollowRequest,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
 ):
     # check for user using username
     follower_user = user_service.get_user_by_username(
@@ -772,7 +913,11 @@ def get_user_followers_following(
     username: str,
     request_info: user_schema.UserFollowersFollowing,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
+    # can't use Depends(auth_utils.check_access_role(role="user")) because Depends doesn't support extra params directly
+    # hence we have a custom dependency class which will set the role param and call the get_current_user function
 ):
     # get user from username
     user = user_service.get_user_by_username(
@@ -812,6 +957,10 @@ def get_user_followers_following(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
+
+    # getting count of followers and following, testing
+    print(len(curr_auth_user.followers))
+    print(len(curr_auth_user.following))
 
     # check the fetch
     followers_list = []
@@ -900,7 +1049,9 @@ def get_user_followers_following(
 def get_follow_requests(
     username: str,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
 ):
     # get user from username
     user = user_service.get_user_by_username(
@@ -964,13 +1115,99 @@ def get_follow_requests(
     return requests_users
 
 
+# remove a follower
+@router.put("/follow/remove/{username}")
+def remove_follower(
+    username: str,
+    user_request: user_schema.UserRemoveFollower,
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
+):
+    # get user from username
+    follower_user = user_service.get_user_by_username(username, ["PBN", "DEL"], db)
+    if not follower_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Follower user not found"
+        )
+
+    if follower_user.status in [
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
+    ]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Follower user profile not found",
+        )
+
+    # get request user
+    user = user_service.get_user_by_username(user_request.username, ["PBN", "DEL"], db)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    if user.status in [
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
+    ]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found",
+        )
+
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(
+        str(current_user.email), ["PBN", "DEL"], db
+    )
+
+    # check user identity
+    if user_request.username != curr_auth_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
+    # get the user follow association entry
+    user_follow_entry_query = user_service.get_user_follow_association_entry_query(
+        follower_user.id, curr_auth_user.id, "ACP", db
+    )
+    user_follow_entry = user_follow_entry_query.first()
+    if not user_follow_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User follow entry not found"
+        )
+
+    # update the follow entry status from ACP to RMV
+    user_follow_entry_query.update(
+        {
+            "status": "RMV",
+            "follower_user_id": user_follow_entry.follower_user_id,
+            "followed_user_id": user_follow_entry.followed_user_id,
+        },
+        synchronize_session=False,
+    )
+    db.commit()
+
+    return {
+        "message": f"{follower_user.username} has been removed from your followers successfully"
+    }
+
+
 # update username
 @router.post("/{username}/username/change")
 def username_change(
     username: str,
     new_username: str = Form(),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
 ):
     update = user_schema.UserUsernameChange(new_username=new_username)
 
@@ -1040,15 +1277,18 @@ def username_change(
     return {"message": "Username change successful"}
 
 
-# soft-delete the user account
-@router.patch("/{username}/remove")
-def soft_delete_user(
+# deactivate/soft-delete the user account
+@router.patch("/{username}/{action}")
+def deactivate_or_soft_delete_user(
     username: str,
+    action: str,
     background_tasks: BackgroundTasks,
     password: str = Form(None),
     hide_interactions: bool = Form(),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
 ):
     # check for password in the request
     if not password:
@@ -1057,7 +1297,7 @@ def soft_delete_user(
         )
 
     # create object
-    delete_request = user_schema.UserDeletion(
+    deactivate_delete_request = user_schema.UserDeactivationDeletion(
         password=password, hide_interactions=hide_interactions
     )
 
@@ -1086,7 +1326,7 @@ def soft_delete_user(
 
     # check if password is right
     password_check = password_utils.verify_password(
-        delete_request.password, user.password
+        deactivate_delete_request.password, user.password
     )
     if not password_check:
         raise HTTPException(
@@ -1107,35 +1347,245 @@ def soft_delete_user(
             detail="Not authorized to perform this action",
         )
 
-    # send mail informing user about the account deletion, we will using mailtrap dummy server for testing
-    try:
-        email_subject = "Your VPKonnect account is scheduled for deletion"
-        email_details = admin_schema.SendEmail(
-            template="account_deletion_email.html",
-            email=[user.email],
-            body_info={"username": user.username},
-        )
-        email_utils.send_email(email_subject, email_details, background_tasks)
-
-        # update status to pending_deletion_(hide/keep)
-        if delete_request.hide_interactions:
+    # check action
+    if action == "deactivate":
+        # update status of the user
+        if deactivate_delete_request.hide_interactions:
             user_query.update(
-                {"status": "PDH"},
+                {"status": "DAH"},
                 synchronize_session=False,
             )
         else:
             user_query.update(
-                {"status": "PDK"},
+                {"status": "DAK"},
                 synchronize_session=False,
             )
+
         db.commit()
-    except Exception as exc:
-        print(exc)
+
+        return {"message": "Your account has been deactivated successfully"}
+
+    elif action == "delete":
+        # send mail informing user about the account deletion, we will using mailtrap dummy server for testing
+        try:
+            email_subject = "Your VPKonnect account is scheduled for deletion"
+            email_details = admin_schema.SendEmail(
+                template="account_deletion_email.html",
+                email=[user.email],
+                body_info={"username": user.username},
+            )
+            email_utils.send_email(email_subject, email_details, background_tasks)
+
+            # update status to pending_deletion_(hide/keep)
+            if deactivate_delete_request.hide_interactions:
+                user_query.update(
+                    {"status": "PDH"},
+                    synchronize_session=False,
+                )
+            else:
+                user_query.update(
+                    {"status": "PDK"},
+                    synchronize_session=False,
+                )
+            db.commit()
+        except Exception as exc:
+            print(exc)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="There was an error in processing delete user request",
+            ) from exc
+
+        return {
+            "message": f"Your account deletion request is accepted. {user.username} account will be deleted after a deactivation period of 30 days. An email for the same has been sent to {user.email}"
+        }
+
+    else:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="There was an error in processing delete user request",
-        ) from exc
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Error processing request"
+        )
+
+
+# # deactivate the user account
+# @router.patch("/{username}/deactivate")
+# def deactivate_user(
+#     username: str,
+#     password: str = Form(),
+#     hide_interactions: bool = Form(),
+#     db: Session = Depends(get_db),
+#     current_user: auth_schema.AccessTokenPayload = Depends(
+#         auth_utils.AccessRoleDependency(role="user")
+#     ),
+# ):
+#     # check if password is entered or not
+#     if not password:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST, detail="Password required"
+#         )
+
+#     # create deactivation object
+#     deactivate_request = user_schema.UserDeactivation(
+#         password=password, hide_interactions=hide_interactions
+#     )
+
+#     # get user query object from username
+#     user_query = user_service.get_user_by_username_query(username, ["PBN", "DEL"], db)
+#     user = user_query.first()
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+#         )
+
+#     if user.status in [
+#         "DAH",
+#         "DAK",
+#         "PDH",
+#         "PDK",
+#     ]:
+#         raise HTTPException(
+#             status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found"
+#         )
+
+#     # check if password is right
+#     password_check = password_utils.verify_password(
+#         deactivate_request.password, user.password
+#     )
+#     if not password_check:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
+#         )
+
+#     # check user identity
+#     if username != user.username:
+#         raise HTTPException(
+#             status_code=status.HTTP_403_FORBIDDEN,
+#             detail="Not authorized to perform requested action",
+#         )
+
+#     # update status of the user
+#     if deactivate_request.hide_interactions:
+#         user_query.update(
+#             {"status": "DAH"},
+#             synchronize_session=False,
+#         )
+#     else:
+#         user_query.update(
+#             {"status": "DAK"},
+#             synchronize_session=False,
+#         )
+
+#     db.commit()
+
+#     return {"message": "Your account has been deactivated successfully"}
+
+
+# report an item
+@router.post("/item/report")
+def report_item(
+    reported_item: user_schema.UserContentReport,
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
+):
+    # check if item is there or not
+    if reported_item.item_type == "post":
+        post = post_service.get_a_post(str(reported_item.item_id), ["DRF", "DEL"], db)
+        if not post:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
+            )
+        if post.status == "BAN":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Post already banned",
+            )
+    elif reported_item.item_type == "comment":
+        comment = comment_service.get_a_comment(str(reported_item.item_id), ["DEL"], db)
+        if not comment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
+            )
+        if comment.status == "BAN":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Comment already banned",
+            )
+
+    # get the reporter and reported user
+    reporter_user = user_service.get_user_by_email(
+        str(current_user.email), ["PBN", "DEL"], db
+    )
+    reported_user = user_service.get_user_by_username(
+        reported_item.username, ["DEL", "PBN"], db
+    )
+    if not reported_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    if reported_user.status in [
+        "DAH",
+        "DAK",
+        "PDH",
+        "PDK",
+    ]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found",
+        )
+
+    report_reason_user = None
+    if reported_item.item_type == "account":
+        reported_item.item_id = reported_user.id
+
+        # if impersonation report where username is specified
+        if reported_item.reason_username:
+            report_reason_user = user_service.get_user_by_username(
+                reported_item.reason_username, ["PBN", "DEL"], db
+            )
+            if not report_reason_user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Original user not found",
+                )
+            if report_reason_user.status in [
+                "DAH",
+                "DAK",
+                "PDH",
+                "PDK",
+            ]:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Original user profile not found",
+                )
+
+    # user cannot report his/her own item
+    if reporter_user.username == reported_user.username:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User cannot report own content",
+        )
+
+    # check table if report exists of same user for same item and same reason
+    same_user_report = user_service.check_if_same_report_exists(
+        reporter_user.id, str(reported_item.item_id), reported_item.reason, db
+    )
+    if same_user_report:
+        return {
+            "message": f"This {reported_item.item_type} has already been reported by you with {reported_item.reason}."
+        }
+
+    # add the report to table
+    user_report = admin_model.UserContentReportDetail(
+        reporter_user_id=reporter_user.id,
+        reported_item_id=reported_item.item_id,
+        reported_item_type=reported_item.item_type,
+        reported_user_id=reported_user.id,
+        report_reason=reported_item.reason,
+        report_reason_user_id=report_reason_user.id if report_reason_user else None,
+    )
+    db.add(user_report)
+    db.commit()
 
     return {
-        "message": f"Your account deletion request is accepted. {user.username} account will be deleted after a deactivation period of 30 days. An email for the same has been sent to {user.email}"
+        "message": f"This {reported_item.item_type} has been reported anonymously and will be handled by content moderator."
     }

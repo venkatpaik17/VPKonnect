@@ -23,7 +23,10 @@ if ENVIRONMENT not in SHOW_DOCS_ENVIRONMENT:
 
 app = FastAPI(**settings.fastapi_kwargs)
 
-app.mount("/images", StaticFiles(directory="images"), name="images")
+app.mount("/images/user", StaticFiles(directory="images/user"), name="user_images")
+app.mount(
+    "/images/employee", StaticFiles(directory="images/employee"), name="employee_images"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,6 +59,6 @@ def scheduler_end():
     scheduler.shutdown()
 
 
-@app.get("/")
+@app.get(settings.api_prefix + "/")
 def root():
     return {"message": "Hello World!"}

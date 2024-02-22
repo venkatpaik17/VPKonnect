@@ -236,3 +236,194 @@ AFTER UPDATE ON "user"
 FOR EACH ROW
 WHEN (NEW.status = 'DEL' AND NEW.is_deleted = TRUE)
 EXECUTE FUNCTION update_user_info_status('delete');
+
+
+/*Sequence for getting a number from 1 to 9999*/
+CREATE SEQUENCE IF NOT EXISTS num_int_1_9999
+AS INT 
+MINVALUE 1 
+MAXVALUE 9999 
+CYCLE;
+
+
+/*Function to generate employee id*/
+CREATE OR REPLACE FUNCTION generate_employee_id(
+    first_name character varying,
+    last_name character varying,
+    join_date date
+)
+RETURNS character varying AS $$
+DECLARE
+    result_id character varying;
+BEGIN
+    result_id := 'V' || TO_CHAR(join_date, 'yyyymmdd') ||
+                 SUBSTRING(first_name, 1, 2) ||
+                 SUBSTRING(last_name, 1, 1) ||
+                 LPAD(nextval('num_int_1_9999')::TEXT, 4, '0');
+    RETURN result_id;
+END;
+$$ LANGUAGE plpgsql;
+
+
+/*Trigger for getting age for employee*/
+CREATE TRIGGER get_age_from_dob_1_trigger
+BEFORE INSERT ON "employee"
+FOR EACH ROW
+EXECUTE FUNCTION get_age_from_dob();
+
+
+CREATE OR REPLACE FUNCTION update_employee_auth_track()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE employee_auth_track 
+    SET status='INV', updated_at = NOW()
+    WHERE employee_id=OLD.employee_id AND device_info=OLD.device_info;
+   
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+/*trigger upon update employee_session when is_active changes to FALSE*/
+CREATE TRIGGER employee_auth_track_logout_trigger
+AFTER UPDATE ON "employee_session"
+FOR EACH ROW
+WHEN (NEW.is_active = FALSE)
+EXECUTE FUNCTION update_employee_auth_track();
+
+
+/*trigger function for user follow association to hide and delete follows when user is deactivated/reactivated or deleted*/
+CREATE OR REPLACE FUNCTION update_user_follow_association_status()
+RETURNS TRIGGER AS $$
+DECLARE
+    action TEXT;
+    new_status TEXT;
+    user_id_param UUID;
+BEGIN
+    IF TG_NARGS <> 1 THEN
+        RAISE EXCEPTION 'Wrong number of arguments for update_user_follow_association_status()';
+    END IF;
+    
+    IF TG_ARGV[0]='hide' or TG_ARGV[0]='keep' THEN
+        -- Handle 'PDH', 'DAH' and 'PDK', 'DAK' case
+        action := TG_ARGV[0];
+        new_status := 'HID';
+        user_id_param := OLD.id;
+       
+    ELSIF TG_ARGV[0]='unhide' THEN
+        -- Handle 'ACT' case
+        action := TG_ARGV[0];
+        new_status := 'ACP';
+        user_id_param := OLD.id;
+
+    ELSIF TG_ARGV[0]='delete' THEN
+        -- Handle 'DEL' case
+        action := TG_ARGV[0];
+        new_status := 'DEL';
+        user_id_param := OLD.id;
+
+    END IF;
+
+    IF action = 'hide' OR action = 'keep' THEN
+        IF EXISTS (SELECT 1 FROM user_follow_association WHERE (follower_user_id = user_id_param OR followed_user_id = user_id_param) AND status = 'ACP') THEN
+            UPDATE user_follow_association
+            SET status = new_status
+            WHERE (follower_user_id = user_id_param OR followed_user_id = user_id_param) AND status = 'ACP';
+        END IF;
+    ELSIF (action = 'unhide' AND (OLD.status IN ('PDH', 'PDK', 'DAH', 'DAK'))) OR action = 'delete' THEN
+        IF EXISTS (SELECT 1 FROM user_follow_association WHERE (follower_user_id = user_id_param OR followed_user_id = user_id_param) AND status = 'HID') THEN
+            UPDATE user_follow_association
+            SET status = new_status
+            WHERE (follower_user_id = user_id_param OR followed_user_id = user_id_param) AND status = 'HID';
+        END IF;
+    END IF;
+    
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER user_deactivate_delete_follow_status_hide_trigger
+AFTER UPDATE ON "user"
+FOR EACH ROW
+WHEN (NEW.status = 'PDH' OR NEW.status = 'DAH')
+EXECUTE FUNCTION update_user_follow_association_status('hide');
+
+CREATE TRIGGER user_deactivate_delete_follow_status_keep_trigger
+AFTER UPDATE ON "user"
+FOR EACH ROW
+WHEN (NEW.status = 'PDK' OR NEW.status = 'DAK')
+EXECUTE FUNCTION update_user_follow_association_status('keep');
+
+CREATE TRIGGER user_deactivate_delete_follow_status_unhide_trigger
+AFTER UPDATE ON "user"
+FOR EACH ROW
+WHEN (OLD.status <> 'INA' AND NEW.status = 'ACT')
+EXECUTE FUNCTION update_user_follow_association_status('unhide');
+
+CREATE TRIGGER user_deactivate_delete_follow_status_delete_trigger
+AFTER UPDATE ON "user"
+FOR EACH ROW
+WHEN (NEW.status = 'DEL' AND NEW.is_deleted = TRUE)
+EXECUTE FUNCTION update_user_follow_association_status('delete');
+
+
+
+/*function for inserting report events*/
+CREATE OR REPLACE FUNCTION insert_report_event_timeline()
+RETURNS TRIGGER AS $$
+DECLARE
+    action TEXT;
+    event TEXT;
+    info TEXT;
+BEGIN
+    IF TG_NARGS <> 1 THEN
+        RAISE EXCEPTION 'Wrong number of arguments for insert_report_event_timeline()';
+    END IF;
+    
+    action = TG_ARGV[0];
+    
+    IF action = 'SUB' THEN
+        event := 'Submitted';
+        info := 'Report Received';
+    ELSIF action = 'REV' THEN
+        event := 'Under Review';
+        info := 'Review in progress';
+    ELSIF action = 'RES' THEN
+        event := 'Resolved';
+        info := 'Content Removed';
+    ELSIF action = 'CLS' THEN
+        event := 'Closed';
+        info := 'Content Not Removed';
+    END IF;
+    
+    INSERT INTO "user_content_report_event_timeline" (event_type, detail, report_id) 
+    VALUES (event, info, NEW.id);
+    
+    RETURN NEW;
+    
+END;
+$$ LANGUAGE plpgsql;
+
+/*triggers*/
+CREATE TRIGGER user_content_report_submit_event_trigger
+AFTER INSERT on "user_content_report_detail"
+FOR EACH ROW
+EXECUTE FUNCTION insert_report_event_timeline('SUB');
+
+CREATE TRIGGER user_content_report_review_event_trigger
+AFTER UPDATE on "user_content_report_detail"
+FOR EACH ROW
+WHEN (OLD.status = 'OPN' AND NEW.status = 'URV')
+EXECUTE FUNCTION insert_report_event_timeline('REV');
+
+CREATE TRIGGER user_content_report_resolve_event_trigger
+AFTER UPDATE on "user_content_report_detail"
+FOR EACH ROW
+WHEN (OLD.status = 'URV' AND NEW.status = 'RSD')
+EXECUTE FUNCTION insert_report_event_timeline('RES');
+
+CREATE TRIGGER user_content_report_close_event_trigger
+AFTER UPDATE on "user_content_report_detail"
+FOR EACH ROW
+WHEN (OLD.status = 'URV' AND NEW.status = 'CSD')
+EXECUTE FUNCTION insert_report_event_timeline('CLS');

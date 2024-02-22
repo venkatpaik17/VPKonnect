@@ -3,6 +3,7 @@ from datetime import timedelta
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.models import admin as admin_model
 from app.models import user as user_model
 
 
@@ -40,6 +41,19 @@ def check_username_exists(username: str, db_session: Session):
 
 def check_user_exists(email: str, db_session: Session):
     return get_user_by_email_query(email, ["DEL"], db_session).first()
+
+
+def get_user_by_id_query(
+    user_id: str, status_not_in_list: list[str], db_session: Session
+):
+    return db_session.query(user_model.User).filter(
+        user_model.User.id == user_id,
+        user_model.User.status.notin_(status_not_in_list),
+    )
+
+
+def get_user_by_id(user_id: str, status_not_in_list: list[str], db_session: Session):
+    return get_user_by_id_query(user_id, status_not_in_list, db_session).first()
 
 
 # get the query for single user session entry
@@ -106,4 +120,29 @@ def check_deactivation_expiration_query(db_session: Session):
             ]
         ),
         func.now() > user_model.User.updated_at + timedelta(days=30),
+    )
+
+
+# # get users whose community guidelines violation period is over and specific action needs to be taken
+# def check_violation_period_expiration_query(
+#     status_list: list[str], time_period: int, db_session: Session
+# ):
+#     return db_session.query(user_model.User).filter(
+#         user_model.User.status.in_(status_list),
+#         func.now() > user_model.User.updated_at + timedelta(hours=time_period),
+#     )
+
+
+# get report entry from usercontentreportdetail table
+def check_if_same_report_exists(
+    user_id: str, content_id: str, report_reason: str, db_session: Session
+):
+    return (
+        db_session.query(admin_model.UserContentReportDetail)
+        .filter(
+            admin_model.UserContentReportDetail.reporter_user_id == user_id,
+            admin_model.UserContentReportDetail.reported_item_id == content_id,
+            admin_model.UserContentReportDetail.report_reason == report_reason,
+        )
+        .first()
     )
