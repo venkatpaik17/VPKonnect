@@ -1,12 +1,15 @@
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import event
 
 from app.api.v0 import api_routes
 from app.config.app import settings
 from app.db.db_sqlalchemy import Base, engine
 from app.models import admin, auth, comment, post, user
+from app.utils import event
 from app.utils import job_task as job_task_utils
 
 ENVIRONMENT = settings.app_environment
@@ -60,5 +63,9 @@ def scheduler_end():
 
 
 @app.get(settings.api_prefix + "/")
-def root():
-    return {"message": "Hello World!"}
+def root(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if auth_header:
+        return RedirectResponse(url=settings.api_prefix + "/users/feed")
+    else:
+        return {"message": "Hello World!"}

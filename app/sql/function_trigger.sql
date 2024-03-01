@@ -368,11 +368,18 @@ EXECUTE FUNCTION update_user_follow_association_status('delete');
 
 
 
-/*function for inserting report events*/
+/* 
+#update the function to customize more
+# For content_type account, closed means 'No Action' instead of 'Not Removed'
+# For content_type account, we can't resolve directly, we need to check if the action is enforced now or later, also we need to know what action is enforced,
+  # so we need have a seperate trigger for handling that
+# this function and resolve trigger is only for post/comment/message
+*/
 CREATE OR REPLACE FUNCTION insert_report_event_timeline()
 RETURNS TRIGGER AS $$
 DECLARE
     action TEXT;
+    content_type TEXT;
     event TEXT;
     info TEXT;
 BEGIN
@@ -381,6 +388,7 @@ BEGIN
     END IF;
     
     action = TG_ARGV[0];
+    content_type = OLD.reported_item_type;
     
     IF action = 'SUB' THEN
         event := 'Submitted';
@@ -390,10 +398,15 @@ BEGIN
         info := 'Review in progress';
     ELSIF action = 'RES' THEN
         event := 'Resolved';
-        info := 'Content Removed';
+        info := content_type || ' Removed';
     ELSIF action = 'CLS' THEN
+        IF content_type = 'account' THEN
+            info := content_type || ' No Action';
+        ELSE
+            info := content_type || ' Not Removed';
+        END IF;
         event := 'Closed';
-        info := 'Content Not Removed';
+        
     END IF;
     
     INSERT INTO "user_content_report_event_timeline" (event_type, detail, report_id) 
@@ -404,7 +417,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-/*triggers*/
+
 CREATE TRIGGER user_content_report_submit_event_trigger
 AFTER INSERT on "user_content_report_detail"
 FOR EACH ROW
@@ -419,7 +432,7 @@ EXECUTE FUNCTION insert_report_event_timeline('REV');
 CREATE TRIGGER user_content_report_resolve_event_trigger
 AFTER UPDATE on "user_content_report_detail"
 FOR EACH ROW
-WHEN (OLD.status = 'URV' AND NEW.status = 'RSD')
+WHEN (OLD.reported_item_type IN ('post', 'comment', 'message') AND (OLD.status = 'URV' AND NEW.status = 'RSD'))
 EXECUTE FUNCTION insert_report_event_timeline('RES');
 
 CREATE TRIGGER user_content_report_close_event_trigger
@@ -427,3 +440,161 @@ AFTER UPDATE on "user_content_report_detail"
 FOR EACH ROW
 WHEN (OLD.status = 'URV' AND NEW.status = 'CSD')
 EXECUTE FUNCTION insert_report_event_timeline('CLS');
+
+
+
+/*function and trigger for handling resolved status for content_type account*/
+CREATE OR REPLACE FUNCTION insert_report_event_timeline_account_resolve()
+RETURNS TRIGGER AS $$
+DECLARE
+    report_id UUID;
+    event TEXT;
+    info TEXT;
+    status TEXT;
+    
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        status := NEW.status;
+        report_id := NEW.report_id;
+    ELSE
+        status := OLD.status;
+        report_id := OLD.report_id;
+    END IF;
+    
+    event := 'Resolved';
+    
+    IF status IN ('RSF', 'RSP') THEN
+        info := 'account restricted';
+    ELSIF status = 'TBN' THEN
+        info := 'account temp banned';
+    ELSIF status = 'PBN' THEN
+        info := 'account perm banned';
+    END IF;
+    
+    INSERT INTO "user_content_report_event_timeline" (event_type, detail, report_id) 
+    VALUES (event, info, report_id);
+    
+    RETURN NEW;
+
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER user_content_report_account_resolve_event_update_trigger
+AFTER UPDATE on "user_restrict_ban_detail"
+FOR EACH ROW
+WHEN (OLD.content_type = 'account' AND (OLD.is_active = FALSE AND NEW.is_active = TRUE))
+EXECUTE FUNCTION insert_report_event_timeline_account_resolve();
+
+CREATE TRIGGER user_content_report_account_resolve_event_insert_trigger
+AFTER INSERT on "user_restrict_ban_detail"
+FOR EACH ROW
+WHEN (NEW.content_type = 'account')
+EXECUTE FUNCTION insert_report_event_timeline_account_resolve();
+
+
+
+/*function and triggers for inserting appeal events*/
+CREATE OR REPLACE FUNCTION insert_appeal_event_timeline()
+RETURNS TRIGGER AS $$
+DECLARE
+    action TEXT;
+    content_type TEXT;
+    event TEXT;
+    info TEXT;
+    user_id_var UUID;
+    ban_restrict_id UUID;
+    user_status TEXT := NULL;
+BEGIN
+    IF TG_NARGS <> 1 THEN
+        RAISE EXCEPTION 'Wrong number of arguments for insert_appeal_event_timeline()';
+    END IF;
+    
+    action = TG_ARGV[0];
+    content_type = OLD.content_type;
+    user_id_var = OLD.user_id;
+    ban_restrict_id = OLD.ban_report_id;
+    
+    IF action = 'SUB' THEN
+        event := 'Submitted';
+        info := 'Appeal Received';
+    ELSIF action = 'REV' THEN
+        event := 'Under Review';
+        info := 'Review in progress';
+    ELSIF action = 'ACP' THEN
+        IF content_type = 'account' THEN
+            SELECT status INTO user_status FROM "user_restrict_ban_detail" WHERE user_id = user_id_var AND id = ban_restrict_id;
+            IF user_status = 'RSP' THEN
+                info := content_type || ' Partial Restrict revoked';
+            ELSIF user_status = 'RSF' THEN
+                info := content_type || ' Full Restrict revoked';
+            ELSIF user_status = 'TBN' THEN
+                info := content_type || ' Temp Ban revoked';
+            ELSIF user_status = 'PBN' THEN
+                info := content_type || ' Permnt Ban revoked';
+            END IF;
+        ELSE
+            info := content_type || ' Ban revoked';
+        END IF;
+        
+        event := 'Accepted';
+    ELSIF action = 'REJ' THEN
+        IF content_type = 'account' THEN
+            SELECT status INTO user_status FROM "user_restrict_ban_detail" WHERE user_id = user_id_var AND id = ban_restrict_id;
+            IF user_status = 'RSP' THEN
+                info := content_type || ' Partial Restrict not revoked';
+            ELSIF user_status = 'RSF' THEN
+                info := content_type || ' Full Restrict not revoked';
+            ELSIF user_status = 'TBN' THEN
+                info := content_type || ' Temp Ban not revoked';
+            ELSIF user_status = 'PBN' THEN
+                info := content_type || ' Permnt Ban not revoked';
+            END IF;
+        ELSE
+            info := content_type || ' Ban not revoked';
+        END IF;
+        
+        event := 'Rejected';
+    ELSIF action = 'CLS' THEN
+        info := 'No Decision';
+        event := 'Closed';
+        
+    END IF;
+    
+    INSERT INTO "user_content_restrict_ban_appeal_event_timeline" (event_type, detail, appeal_id) 
+    VALUES (event, info, NEW.id);
+    
+    RETURN NEW;
+    
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER user_content_restrict_ban_appeal_submit_event_trigger
+AFTER INSERT on "user_content_restrict_ban_appeal_detail"
+FOR EACH ROW
+EXECUTE FUNCTION insert_appeal_event_timeline('SUB');
+
+CREATE TRIGGER user_content_restrict_ban_appeal_review_event_trigger
+AFTER UPDATE on "user_content_restrict_ban_appeal_detail"
+FOR EACH ROW
+WHEN (OLD.status = 'OPN' AND NEW.status = 'URV')
+EXECUTE FUNCTION insert_appeal_event_timeline('REV');
+
+CREATE TRIGGER user_content_restrict_ban_appeal_accept_event_trigger
+AFTER UPDATE on "user_content_restrict_ban_appeal_detail"
+FOR EACH ROW
+WHEN (OLD.status = 'URV' AND NEW.status = 'ACP')
+EXECUTE FUNCTION insert_appeal_event_timeline('ACP');
+
+CREATE TRIGGER user_content_restrict_ban_appeal_reject_event_trigger
+AFTER UPDATE on "user_content_restrict_ban_appeal_detail"
+FOR EACH ROW
+WHEN (OLD.status = 'URV' AND NEW.status = 'REJ')
+EXECUTE FUNCTION insert_appeal_event_timeline('REJ');
+
+CREATE TRIGGER user_content_restrict_ban_appeal_close_event_trigger
+AFTER UPDATE on "user_content_restrict_ban_appeal_detail"
+FOR EACH ROW
+WHEN (OLD.status = 'URV' AND NEW.status = 'CSD')
+EXECUTE FUNCTION insert_appeal_event_timeline('CLS');

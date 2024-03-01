@@ -19,7 +19,7 @@ from app.services import employee as employee_service
 from app.services import post as post_service
 from app.services import user as user_service
 from app.utils import auth as auth_utils
-from app.utils import maps as maps_utils
+from app.utils import map as map_utils
 
 router = APIRouter(prefix=settings.api_prefix + "/admin", tags=["Admin"])
 
@@ -141,7 +141,7 @@ def get_requested_report(
         ),
         reported_item_type=requested_report.reported_item_type,
         case_number=requested_report.case_number,
-        report_reason=maps_utils.report_reasons_code_dict.get(requested_report.report_reason),  # type: ignore
+        report_reason=map_utils.report_reasons_code_dict.get(requested_report.report_reason),  # type: ignore
         report_reason_user=(
             requested_report.report_reason_user.__dict__
             if requested_report.report_reason_user
@@ -291,7 +291,7 @@ def enforce_report_action_auto(
         )
 
     # map report reason to severity group
-    severity_group = maps_utils.report_reasons_severity_group_dict.get(
+    severity_group = map_utils.report_reasons_severity_group_dict.get(
         action_request.report_reason
     )
     if not severity_group:
@@ -306,14 +306,14 @@ def enforce_report_action_auto(
         )
 
     # map severity group to severity score
-    severity_score = maps_utils.severity_groups_scores_dict.get(severity_group)
+    severity_score = map_utils.severity_groups_scores_dict.get(severity_group)
     if not severity_score:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Severity score not found"
         )
 
     # map content type to weights
-    content_weight = maps_utils.content_weigths_dict.get(
+    content_weight = map_utils.content_weigths_dict.get(
         action_request.reported_item_type
     )
     if not content_weight:
@@ -347,8 +347,10 @@ def enforce_report_action_auto(
     if curr_final_violation_score == new_final_violation_score:
         no_action = True
     else:
-        action_duration = maps_utils.get_action_duration_final_violation_score(
-            new_final_violation_score
+        action_duration = tuple(
+            map_utils.get_action_duration_final_violation_score(
+                new_final_violation_score
+            )
         )
         if action_duration[0] is None:
             raise HTTPException(
@@ -366,16 +368,20 @@ def enforce_report_action_auto(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+
+    user_deactivated = False
     if reported_user.status in [
         "DAH",
         "DAK",
         "PDH",
         "PDK",
     ]:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found",
-        )
+        user_deactivated = True
+
+        # raise HTTPException(
+        #     status_code=status.HTTP_404_NOT_FOUND,
+        #     detail="User profile not found",
+        # )
 
     # set the score_type and get curr_score for the content type
     score_type = None
@@ -413,6 +419,7 @@ def enforce_report_action_auto(
             user_all_restrict_ban_query.filter(
                 admin_model.UserRestrictBanDetail.enforce_action_at > func.now(),
                 admin_model.UserRestrictBanDetail.is_active == False,
+                admin_model.UserRestrictBanDetail.is_deleted == False,
             )
             .order_by(admin_model.UserRestrictBanDetail.enforce_action_at.desc())
             .first()
@@ -455,11 +462,12 @@ def enforce_report_action_auto(
             # add restrict/ban entry
             db.add(new_user_retrict_ban)
 
-            # update user status in user table only if action is enforced now i.e is_active = True, else don't update
-            if new_user_retrict_ban.is_active:
-                reported_user_query.update(
-                    {"status": action_duration[0]}, synchronize_session=False
-                )
+            # update user status in user table only if action is enforced now i.e is_active = True and user is not deactivated, else don't update
+            if new_user_retrict_ban.is_active and not user_deactivated:
+                # reported_user_query.update(
+                #     {"status": action_duration[0]}, synchronize_session=False
+                # )
+                reported_user.status = action_duration[0]
 
             db.commit()
         except SQLAlchemyError as exc:
@@ -487,11 +495,13 @@ def enforce_report_action_auto(
         )
         # get related under review reports
         related_reports_query = (
-            admin_service.get_related_reports_under_review_for_specific_reports_query(
-                action_request.case_number,
-                str(action_request.reported_item_id),
-                action_request.reported_item_type,
-                db,
+            admin_service.get_related_reports_for_specific_report_query(
+                case_number=action_request.case_number,
+                reported_user_id=str(action_request.reported_user_id),
+                reported_item_id=str(action_request.reported_item_id),
+                reported_item_type=action_request.reported_item_type,
+                status="URV",
+                db_session=db,
             )
         )
         related_reports = related_reports_query.all()
@@ -509,11 +519,11 @@ def enforce_report_action_auto(
                         synchronize_session=False,
                     )
 
-        # delete content only if it is post/comment
+        # ban content only if it is post/comment
         content_to_be_deleted = post_query or comment_query  # type: ignore
-        # delete the content
+        # ban the content
         content_to_be_deleted.update(
-            {"status": "DEL", "is_deleted": True},
+            {"status": "BAN"},
             synchronize_session=False,
         )
         db.commit()
@@ -580,23 +590,26 @@ def enforce_report_action_manual(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+
+    user_deactivated = False
     if reported_user.status in [
         "DAH",
         "DAK",
         "PDH",
         "PDK",
     ]:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found",
-        )
+        user_deactivated = True
+        # raise HTTPException(
+        #     status_code=status.HTTP_404_NOT_FOUND,
+        #     detail="User profile not found",
+        # )
 
     # map action, duration with minimum required violation score
     action_duration = (
         action_request.action,
         action_request.duration,
     )
-    min_req_violation_score = maps_utils.action_entry_score_dict.get(action_duration)
+    min_req_violation_score = map_utils.action_entry_score_dict.get(action_duration)  # type: ignore
     if not min_req_violation_score:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -703,9 +716,11 @@ def enforce_report_action_manual(
         db.add(new_user_retrict_ban)
 
         # update report entry
-        report_query.update(
-            {"status": "RSD", "moderator_note": "RS"}, synchronize_session=False
-        )
+        # report_query.update(
+        #     {"status": "RSD", "moderator_note": "RS"}, synchronize_session=False
+        # )
+        report.status = "RSD"
+        report.moderator_note = "RS"
 
         # update guideline violation score entry
         user_guideline_violation_score_query.update(
@@ -717,19 +732,22 @@ def enforce_report_action_manual(
             synchronize_session=False,
         )
 
-        # update user status in user table only if action is enforced now i.e is_active = True, else don't update
-        if new_user_retrict_ban.is_active:
-            reported_user_query.update(
-                {"status": action_duration[0]}, synchronize_session=False
-            )
+        # update user status in user table only if action is enforced now i.e is_active = True, and user is not deactivated else don't update
+        if new_user_retrict_ban.is_active and not user_deactivated:
+            # reported_user_query.update(
+            #     {"status": action_duration[0]}, synchronize_session=False
+            # )
+            reported_user.status = action_duration[0]
 
         # get related under review reports
         related_reports_query = (
-            admin_service.get_related_reports_under_review_for_specific_reports_query(
-                action_request.case_number,
-                str(action_request.reported_item_id),
-                action_request.reported_item_type,
-                db,
+            admin_service.get_related_reports_for_specific_report_query(
+                case_number=action_request.case_number,
+                reported_user_id=str(action_request.reported_user_id),
+                reported_item_id=str(action_request.reported_item_id),
+                reported_item_type=action_request.reported_item_type,
+                status="URV",
+                db_session=db,
             )
         )
         related_reports = related_reports_query.all()
@@ -752,7 +770,7 @@ def enforce_report_action_manual(
             content_to_be_deleted = post_query or comment_query  # type: ignore
             # delete the content
             content_to_be_deleted.update(
-                {"status": "DEL", "is_deleted": True},
+                {"status": "BAN"},
                 synchronize_session=False,
             )
 

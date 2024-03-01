@@ -1,3 +1,5 @@
+from http import server
+
 from sqlalchemy import (
     TIMESTAMP,
     BigInteger,
@@ -81,6 +83,14 @@ class UserRestrictBanDetail(Base):
         single_parent=True,
         cascade="all, delete-orphan",
     )
+    account = relationship(
+        "User",
+        foreign_keys=[content_id],
+        primaryjoin="and_(UserRestrictBanDetail.content_type=='account', UserRestrictBanDetail.content_id==User.id)",
+        overlaps="post, comment",
+        single_parent=True,
+        cascade="all, delete-orphan",
+    )
 
 
 class UserContentReportDetail(Base):
@@ -133,6 +143,8 @@ class UserContentReportDetail(Base):
         "Post",
         foreign_keys=[reported_item_id],
         primaryjoin="and_(UserContentReportDetail.reported_item_type=='post', UserContentReportDetail.reported_item_id==Post.id)",
+        single_parent=True,
+        cascade="all, delete-orphan",
     )
 
     comment = relationship(
@@ -140,6 +152,8 @@ class UserContentReportDetail(Base):
         foreign_keys=[reported_item_id],
         primaryjoin="and_(UserContentReportDetail.reported_item_type=='comment', UserContentReportDetail.reported_item_id==Comment.id)",
         overlaps="post",
+        single_parent=True,
+        cascade="all, delete-orphan",
     )
 
     account = relationship(
@@ -147,6 +161,8 @@ class UserContentReportDetail(Base):
         foreign_keys=[reported_item_id],
         primaryjoin="and_(UserContentReportDetail.reported_item_type=='account', UserContentReportDetail.reported_item_id==User.id)",
         overlaps="comment, post",
+        single_parent=True,
+        cascade="all, delete-orphan",
     )
 
     reporter_user = relationship("User", foreign_keys=[reporter_user_id])
@@ -172,3 +188,84 @@ class GuidelineViolationScore(Base):
     )
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
     last_added_score = Column(Integer(), nullable=False, server_default=text("0"))
+
+
+class UserContentRestrictBanAppealDetail(Base):
+    __tablename__ = "user_content_restrict_ban_appeal_detail"
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.generate_ulid(),
+    )
+    case_number = Column(
+        BigInteger(),
+        unique=True,
+        nullable=False,
+        server_default=func.get_next_value_from_sequence_ban_appeal_table(),
+    )
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+    ban_report_id = Column(UUID(as_uuid=True), nullable=False)
+    content_type = Column(String(), nullable=False)
+    content_id = Column(UUID(as_uuid=True), nullable=False)
+    appeal_detail = Column(String(), nullable=False)
+    attachment = Column(String(), nullable=True)
+    status = Column(String(length=3), nullable=False, server_default=text("'OPN'"))
+    moderator_id = Column(
+        UUID(as_uuid=True), ForeignKey("employee.id", ondelete="CASCADE"), nullable=True
+    )
+    moderator_note = Column(String(), nullable=True)
+    is_deleted = Column(Boolean(), nullable=False, server_default=text("False"))
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("NOW()"),
+        nullable=False,
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        onupdate=func.now(),
+    )
+
+    ban = relationship(
+        "UserRestrictBanDetail",
+        foreign_keys=[ban_report_id],
+        primaryjoin="and_(UserContentRestrictBanAppealDetail.content_type=='account', UserContentRestrictBanAppealDetail.ban_report_id==UserRestrictBanDetail.id)",
+        single_parent=True,
+        cascade="all, delete-orphan",
+    )
+
+    report = relationship(
+        "UserContentReportDetail",
+        foreign_keys=[ban_report_id],
+        primaryjoin="and_(or_(UserContentRestrictBanAppealDetail.content_type=='post', UserContentRestrictBanAppealDetail.content_type=='comment'), UserContentRestrictBanAppealDetail.ban_report_id==UserContentReportDetail.id)",
+        overlaps="ban",
+        single_parent=True,
+        cascade="all, delete-orphan",
+    )
+
+    post = relationship(
+        "Post",
+        foreign_keys=[content_id],
+        primaryjoin="and_(UserContentRestrictBanAppealDetail.content_type=='post', UserContentRestrictBanAppealDetail.content_id==Post.id)",
+        single_parent=True,
+        cascade="all, delete-orphan",
+    )
+
+    comment = relationship(
+        "Comment",
+        foreign_keys=[content_id],
+        primaryjoin="and_(UserContentRestrictBanAppealDetail.content_type=='comment', UserContentRestrictBanAppealDetail.content_id==Comment.id)",
+        overlaps="post",
+        single_parent=True,
+        cascade="all, delete-orphan",
+    )
+    account = relationship(
+        "User",
+        foreign_keys=[content_id],
+        primaryjoin="and_(UserContentRestrictBanAppealDetail.content_type=='account', UserContentRestrictBanAppealDetail.content_id==User.id)",
+        overlaps="post, comment",
+        single_parent=True,
+        cascade="all, delete-orphan",
+    )

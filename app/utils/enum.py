@@ -130,6 +130,18 @@ class UserContentReportDetailStatusEnum(str, Enum):
     RESOLVED = "RSD"
 
 
+class UserContentAppealDetailStatusEnum(str, Enum):
+    """
+    Enum for usercontentappealdetail status values 'open', 'under_review', 'accepted', 'rejected', 'closed'
+    """
+
+    OPEN = "OPN"
+    UNDER_REVIEW = "URV"
+    ACCEPTED = "ACP"
+    REJECTED = "REJ"
+    CLOSED = "CSD"
+
+
 class EmployeeStatusEnum(str, Enum):
     """
     Enum for employee status values 'active_regular', 'active_probationary', 'inactive', 'terminated', 'suspended'

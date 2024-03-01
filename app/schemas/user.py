@@ -140,3 +140,12 @@ class UserContentReport(BaseModel):
 
 class UserOutput(BaseModel):
     username: str
+
+
+class UserContentAppeal(BaseModel):
+    username: str
+    email: EmailStr
+    content_type: str
+    content_id: UUID | None
+    user_status: str | None
+    detail: str

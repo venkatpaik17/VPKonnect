@@ -1,5 +1,5 @@
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import (
     APIRouter,
@@ -13,7 +13,7 @@ from fastapi import (
 from PIL import Image, UnidentifiedImageError
 from pydantic import EmailStr
 from pyfa_converter import FormDepends
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,7 @@ from app.models import user as user_model
 from app.schemas import admin as admin_schema
 from app.schemas import auth as auth_schema
 from app.schemas import user as user_schema
+from app.services import admin as admin_service
 from app.services import auth as auth_service
 from app.services import comment as comment_service
 from app.services import post as post_service
@@ -138,13 +139,13 @@ def create_user(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Error processing image"
             ) from exc
 
-        # db transaction, we flush the user with customized image filename and use user id as name for user subfolder
+        # db transaction, we flush the user with customized image filename and use user repr id as name for user subfolder
         # If everything goes right then only we commit. Any exceptions, rollback.
         try:
             upload_datetime = datetime.now().strftime("%Y%m%d%H%M%S")
             image_name = f"{request.username}_{upload_datetime}_{image.filename}"
 
-            add_user = user_model.User(**request.dict(), profile_picture=image_name)  # type: ignore
+            add_user = user_model.User(**request.dict(), profile_picture=image_name)
             db.add(add_user)
             db.flush()
 
@@ -1588,4 +1589,232 @@ def report_item(
 
     return {
         "message": f"This {reported_item.item_type} has been reported anonymously and will be handled by content moderator."
+    }
+
+
+@router.get("/feed")
+def user_feed(
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="user")
+    ),
+):
+    user = user_service.get_user_by_email(
+        str(current_user.email),
+        ["PBN", "DEL"],
+        db,
+    )
+
+    return {"message": f"Feed of {user.username}"}
+
+
+@router.post("/appeal")
+def appeal_content(
+    appeal_user_request: user_schema.UserContentAppeal = FormDepends(
+        user_schema.UserContentAppeal
+    ),  # type: ignore
+    attachment: UploadFile | None = None,
+    db: Session = Depends(get_db),
+):
+    restrict_ban_entry = None
+    report_entry = None
+    # get appeal user
+    if appeal_user_request.content_type == "account":
+        # get the user using username and email
+        appeal_user = user_service.get_user_by_username_email(
+            username=appeal_user_request.username,
+            email=appeal_user_request.email,
+            status_in_list=["TBN", "PBN", "RSP", "RSF"],
+            db_session=db,
+        )
+        if not appeal_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Appeal user not banned or maybe deleted",
+            )
+
+        appeal_user_request.content_id = appeal_user.id
+
+        # check if 30 days appeal limit is crossed or not for PBN status
+        if appeal_user.status == "PBN":
+            user_ban_entry = (
+                db.query(admin_model.UserRestrictBanDetail.user_id)
+                .filter(
+                    admin_model.UserRestrictBanDetail.user_id == appeal_user.id,
+                    admin_model.UserRestrictBanDetail.status == appeal_user.status,
+                    (
+                        admin_model.UserRestrictBanDetail.enforce_action_at
+                        + timedelta(days=30)
+                    )
+                    < func.now(),
+                    admin_model.UserRestrictBanDetail.is_active == True,
+                    admin_model.UserRestrictBanDetail.is_deleted == False,
+                )
+                .first()
+            )
+            if user_ban_entry:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Your account has been permanently deleted because it did not follow our community guidelines. This decision cannot be reversed either because we have already reviewed it, or because 30 days have passed since your account was permanently banned.",
+                )
+
+        # get the ban entry
+        restrict_ban_entry = admin_service.get_user_active_restrict_ban_entry(
+            user_id=appeal_user.id,
+            status_in_list=[appeal_user_request.user_status],  # type: ignore
+            db_session=db,
+        )
+        if not restrict_ban_entry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Appeal user restrict/ban entry not found",
+            )
+
+    else:
+        appeal_user = user_service.get_user_by_username_email(
+            username=appeal_user_request.username,
+            email=appeal_user_request.email,
+            status_in_list=["ACT", "RSP", "RSF"],
+            db_session=db,
+        )
+        if not appeal_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Appeal user not found"
+            )
+
+        # check if the post/comment is really banned/deleted or not
+        if appeal_user_request.content_type == "post":
+            banned_post = post_service.get_a_post(
+                post_id=str(appeal_user_request.content_id),
+                status_not_in_list=["PUB", "DRF", "HID", "DEL"],
+                db_session=db,
+            )
+            if not banned_post:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Appealed post not banned",
+                )
+
+        elif appeal_user_request.content_type == "comment":
+            banned_comment = comment_service.get_a_comment(
+                comment_id=str(appeal_user_request.content_id),
+                status_not_in_list=["PUB", "HID", "DEL"],
+                db_session=db,
+            )
+            if not banned_comment:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Appealed comment not banned",
+                )
+
+        # get the report entry
+        report_entry = admin_service.get_a_report_by_content_id_user_id(
+            user_id=str(appeal_user.id),
+            content_id=str(appeal_user_request.content_id),
+            status="RSD",
+            db_session=db,
+        )
+        if not report_entry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Appeal content report entry not found",
+            )
+
+    ban_report_entry = restrict_ban_entry or report_entry
+
+    # add the appeal
+    new_appeal = admin_model.UserContentRestrictBanAppealDetail(
+        user_id=appeal_user.id,
+        user_status=appeal_user_request.user_status,
+        ban_report_id=ban_report_entry.id,
+        content_type=appeal_user_request.content_type,
+        content_id=appeal_user_request.content_id,
+        appeal_detail=appeal_user_request.detail,
+    )
+
+    # image related code
+    # if there is image uploaded, create a subfolder for profile pics, if folder exists get it. Upload the image in this folder.
+    if attachment:
+        # handling image validatity and unsupported types
+        try:
+            # we try to open the image, raises UnidentifiedImageError when image doesn't open
+            with Image.open(attachment.file) as img:
+                # verifies the image for any tampering/corruption, raises exception if verification fails
+                img.verify()
+
+            # move file pointer to the beginning of the file
+            attachment.file.seek(0)
+
+            # read the image file and check file size
+            # img_read = image.file.read()
+            # print(len(img_read))
+
+            # Move to the end of the file, get image size, no need to read the file
+            attachment.file.seek(0, 2)
+            image_size = attachment.file.tell()
+
+            # move file pointer to the beginning of the file
+            attachment.file.seek(0)
+            print(image_size)
+
+            # if len(img_read) > MAX_SIZE: if image is read, we need to get the size using len()
+            if image_size > MAX_SIZE:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Image too large, you can upload upto 5 MiB",
+                )
+        except UnidentifiedImageError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid image format"
+            ) from exc
+        except HTTPException as exc:
+            raise exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Error processing image"
+            ) from exc
+
+        # If everything goes right then only we commit. Any exceptions, rollback.
+        try:
+            # create a subfolder for user specific uploads, if folder exists get it.
+            user_subfolder = image_utils.get_or_create_entity_image_subfolder(
+                "user", str(appeal_user.repr_id)
+            )
+
+            # create a subfolder for profile images, if folder exists get it.
+            appeals_subfolder = (
+                image_utils.get_or_create_user_appeals_attachment_subfolder(
+                    user_subfolder
+                )
+            )
+
+            upload_datetime = datetime.now().strftime("%Y%m%d%H%M%S")
+            attachment_name = (
+                f"{appeal_user.username}_{upload_datetime}_{attachment.filename}"
+            )
+
+            attachment_path = appeals_subfolder / attachment_name
+
+            with open(attachment_path, "wb+") as f:
+                shutil.copyfileobj(attachment.file, f)
+
+            new_appeal.attachment = attachment_name
+
+            db.add(new_appeal)
+            db.commit()
+
+        except Exception as exc:
+            db.rollback()
+            print(exc)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error submitting appeal",
+            ) from exc
+
+    else:
+        db.add(new_appeal)
+        db.commit()
+
+    return {
+        "message": f"Your appeal for {appeal_user_request.content_type} {'@'+ appeal_user.username if appeal_user_request.content_type == 'account' else appeal_user_request.content_id} has been submitted successfully and will be handled by content moderator."
     }

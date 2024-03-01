@@ -24,6 +24,13 @@ def get_or_create_entity_profile_image_subfolder(entity_subfolder: Path):
     return profile_subfolder
 
 
+def get_or_create_user_appeals_attachment_subfolder(user_subfolder: Path):
+    appeals_subfolder = user_subfolder / "appeals"
+    appeals_subfolder.mkdir(parents=True, exist_ok=True)
+
+    return appeals_subfolder
+
+
 def get_or_create_user_posts_image_subfolder(user_subfolder: Path):
     posts_subfolder = user_subfolder / "posts"
     posts_subfolder.mkdir(parents=True, exist_ok=True)

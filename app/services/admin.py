@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import date, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models import admin as admin_model
@@ -90,6 +90,21 @@ def get_all_requested_reports_by_case_number_list(
     )
 
 
+def get_a_report_by_content_id_user_id(
+    user_id: str, content_id: str, status: str, db_session: Session
+):
+    return (
+        db_session.query(admin_model.UserContentReportDetail)
+        .filter(
+            admin_model.UserContentReportDetail.reported_user_id == user_id,
+            admin_model.UserContentReportDetail.reported_item_id == content_id,
+            admin_model.UserContentReportDetail.status == status,
+            admin_model.UserContentReportDetail.is_deleted == False,
+        )
+        .first()
+    )
+
+
 def get_user_guideline_violation_score_query(user_id: str, db_session: Session):
     return db_session.query(admin_model.GuidelineViolationScore).filter(
         admin_model.GuidelineViolationScore.user_id == user_id
@@ -113,16 +128,48 @@ def get_all_user_restrict_ban_query(user_id: str, db_session: Session):
     )
 
 
-def get_related_reports_under_review_for_specific_reports_query(
+def get_related_reports_for_specific_report_query(
     case_number: int,
+    reported_user_id: str,
     reported_item_id: str,
     reported_item_type: str,
+    status: str,
     db_session: Session,
 ):
     return db_session.query(admin_model.UserContentReportDetail).filter(
         admin_model.UserContentReportDetail.case_number != case_number,
+        admin_model.UserContentReportDetail.reported_user_id == reported_user_id,
         admin_model.UserContentReportDetail.reported_item_id == reported_item_id,
         admin_model.UserContentReportDetail.reported_item_type == reported_item_type,
-        admin_model.UserContentReportDetail.status == "URV",
+        admin_model.UserContentReportDetail.status == status,
         admin_model.UserContentReportDetail.is_deleted == False,
+    )
+
+
+def get_restricted_users_duration_expired_query(db_session: Session):
+    return db_session.query(admin_model.UserRestrictBanDetail).filter(
+        admin_model.UserRestrictBanDetail.status.in_(["RSP", "RSF"]),
+        admin_model.UserRestrictBanDetail.is_active == True,
+        admin_model.UserRestrictBanDetail.is_deleted == False,
+        func.now()
+        > (
+            admin_model.UserRestrictBanDetail.enforce_action_at
+            + timedelta(hours=admin_model.UserRestrictBanDetail.duration)  # type: ignore
+        ),
+    )
+
+
+# get user active restrict/ban entry
+def get_user_active_restrict_ban_entry(
+    user_id: str, status_in_list: list[str], db_session: Session
+):
+    return (
+        db_session.query(admin_model.UserRestrictBanDetail)
+        .filter(
+            admin_model.UserRestrictBanDetail.user_id == user_id,
+            admin_model.UserRestrictBanDetail.status.in_(status_in_list),
+            admin_model.UserRestrictBanDetail.is_active == True,
+            admin_model.UserRestrictBanDetail.is_deleted == False,
+        )
+        .first()
     )

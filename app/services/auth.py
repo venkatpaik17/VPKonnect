@@ -10,7 +10,22 @@ def check_refresh_token_id_in_user_auth_track(
     return get_auth_track_entry_by_token_id_query(token_id, status, db_session).first()
 
 
-# get the query for user auth track entry
+# get the user auth track entry using user id and device info
+def get_all_user_auth_track_entry_by_user_id_device_info(
+    user_id: str, device_info: str, status: str, db_session: Session
+):
+    return (
+        db_session.query(auth_model.UserAuthTrack)
+        .filter(
+            auth_model.UserAuthTrack.user_id == user_id,
+            auth_model.UserAuthTrack.device_info == device_info,
+            auth_model.UserAuthTrack.status == status,
+        )
+        .first()
+    )
+
+
+# get the query for user auth track entry using token id
 def get_auth_track_entry_by_token_id_query(
     token_id: str, status: str, db_session: Session
 ):

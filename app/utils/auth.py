@@ -4,7 +4,7 @@ from typing import Any
 from uuid import uuid4
 
 from cachetools import TTLCache, keys
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from fastapi.security.oauth2 import OAuth2PasswordBearer
 from jose import ExpiredSignatureError, JWTError, jwt
 
@@ -106,17 +106,6 @@ def create_refresh_token(claims: dict):
     return encoded_jwt_rt, refresh_token_unique_id
 
 
-def decode_token_get_user(token: str):
-    claims = jwt.decode(
-        token,
-        ACCESS_TOKEN_SECRET_KEY,
-        algorithms=[ALGORITHM],
-        options={"verify_exp": False},
-    )
-    user_email = claims.get("sub")
-    return user_email if user_email else False
-
-
 def decode_token_get_token_id(token: str):
     claims = jwt.decode(
         token,
@@ -126,6 +115,18 @@ def decode_token_get_token_id(token: str):
     )
     token_id = claims.get("jti")
     return token_id if token_id else False
+
+
+def decode_token_get_user_token_id(token: str):
+    claims = jwt.decode(
+        token,
+        REFRESH_TOKEN_SECRET_KEY,
+        algorithms=[ALGORITHM],
+        options={"verify_exp": False},
+    )
+    user_email = claims.get("sub")
+    token_id = claims.get("jti")
+    return (user_email, token_id) if (user_email and token_id) else False
 
 
 def verify_reset_token(token: str):
@@ -150,8 +151,6 @@ def verify_reset_token(token: str):
 
         # check token expiry
         if token_exp < datetime.now().timestamp():
-            # blacklist the token if expired
-            blacklist_token(token_data.token_id)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Password reset failed, Reset token expired",
@@ -191,8 +190,6 @@ def verify_user_verify_token(token: str):
 
         # check token expiry
         if token_exp < datetime.now().timestamp():
-            # blacklist the token if expired
-            blacklist_token(token_data.token_id)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User verification failed, Verify token expired",
@@ -225,7 +222,6 @@ def verify_access_token(access_token: str):
             )
     # if token is expired
     except ExpiredSignatureError as exc:
-        blacklist_token(access_token)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired",
@@ -299,14 +295,27 @@ def verify_refresh_token(refresh_token: str):
 # get the active user, authentication and authorization
 def get_current_user(
     access_token: str = Depends(oauth2_scheme),
+    refresh_token: str = Cookie(None),
 ):
-    # check access token in the blacklist
-    access_token_blacklist_check = is_token_blacklisted(access_token)
-    if access_token_blacklist_check:
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Refresh token required"
+        )
+
+    # decode refresh token
+    refresh_token_id = decode_token_get_token_id(refresh_token)
+    if not refresh_token_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        )
+
+    # check refresh token id in the blacklist
+    refresh_token_blacklist_check = is_token_blacklisted(refresh_token_id)
+    if refresh_token_blacklist_check:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Access Denied, Token invalid/revoked",
-            headers={"WWW-Authenticate": "Bearer"},
         )
     # verify access token
     access_token_data = verify_access_token(access_token)
@@ -379,8 +388,8 @@ class AccessRoleDependency:
     ):
         type_desgn = current_user.type
         if type_desgn not in access_roles[self.role]:
-            print("1")
-            print(type_desgn)
+            # print("1")
+            # print(type_desgn)
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to perform requested action",

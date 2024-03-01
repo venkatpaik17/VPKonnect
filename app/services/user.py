@@ -56,6 +56,31 @@ def get_user_by_id(user_id: str, status_not_in_list: list[str], db_session: Sess
     return get_user_by_id_query(user_id, status_not_in_list, db_session).first()
 
 
+# get all users query by id
+def get_all_users_by_id(
+    user_id_list: list[str], status_not_in_list: list[str], db_session: Session
+):
+    return db_session.query(user_model.User).filter(
+        user_model.User.id.in_(user_id_list),
+        user_model.User.status.notin_(status_not_in_list),
+    )
+
+
+# get user by username and email
+def get_user_by_username_email(
+    username: str, email: str, status_in_list: list[str], db_session: Session
+):
+    return (
+        db_session.query(user_model.User)
+        .filter(
+            user_model.User.username == username,
+            user_model.User.email == email,
+            user_model.User.status.in_(status_in_list),
+        )
+        .first()
+    )
+
+
 # get the query for single user session entry
 def get_user_session_one_entry_query(
     user_id: str,

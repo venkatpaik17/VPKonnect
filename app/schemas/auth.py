@@ -24,6 +24,7 @@ class RefreshTokenPayload(AccessTokenPayload):
 
 class UserLogout(BaseModel):
     username: str
+    device_info: str | None
     action: str
     flow: str
 
@@ -45,4 +46,5 @@ class EmployeeLogin(BaseModel):
 
 class EmployeeLogout(BaseModel):
     emp_id: str
+    device_info: str
     action: str
