@@ -1,6 +1,7 @@
 from datetime import timedelta
+from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.models import admin as admin_model
@@ -56,13 +57,18 @@ def get_user_by_id(user_id: str, status_not_in_list: list[str], db_session: Sess
     return get_user_by_id_query(user_id, status_not_in_list, db_session).first()
 
 
-# get all users query by id
+# get all users by id
 def get_all_users_by_id(
-    user_id_list: list[str], status_not_in_list: list[str], db_session: Session
+    user_id_list: list[str], status_in_list: list[str], db_session: Session
 ):
-    return db_session.query(user_model.User).filter(
-        user_model.User.id.in_(user_id_list),
-        user_model.User.status.notin_(status_not_in_list),
+    return (
+        db_session.query(user_model.User)
+        .filter(
+            user_model.User.id.in_(user_id_list),
+            user_model.User.status.in_(status_in_list),
+            user_model.User.is_deleted == False,
+        )
+        .all()
     )
 
 
@@ -78,6 +84,14 @@ def get_user_by_username_email(
             user_model.User.status.in_(status_in_list),
         )
         .first()
+    )
+
+
+# get user by status
+def get_user_by_status(status_in_list: list[str], db_session: Session):
+    return db_session.query(user_model.User).filter(
+        user_model.User.status.in_(status_in_list),
+        user_model.User.is_deleted == False,
     )
 
 
@@ -135,16 +149,37 @@ def get_user_follow_requests(followed_id: str, status: str, db_session: Session)
     )
 
 
-# get users whose deactivation period is done
-def check_deactivation_expiration_query(db_session: Session):
-    return db_session.query(user_model.User).filter(
-        user_model.User.status.in_(
-            [
-                "PDH",
-                "PDK",
-            ]
-        ),
-        func.now() > user_model.User.updated_at + timedelta(days=30),
+# get users whose deactivation period for scheduled delete is done
+def check_deactivation_expiration_for_scheduled_delete(db_session: Session):
+    # get latest entries of each user
+    subq = (
+        db_session.query(
+            user_model.UserAccountHistory.user_id,
+            func.max(user_model.UserAccountHistory.created_at).label(
+                "latest_created_at"
+            ),
+        )
+        .group_by(user_model.UserAccountHistory.user_id)
+        .subquery()
+    )
+
+    # inner join with the table to get the required user account history entries
+    return (
+        db_session.query(user_model.UserAccountHistory)
+        .join(
+            subq,
+            and_(
+                user_model.UserAccountHistory.user_id == subq.c.user_id,
+                user_model.UserAccountHistory.created_at == subq.c.latest_created_at,
+            ),
+        )
+        .filter(
+            user_model.UserAccountHistory.account_detail_type == "Account",
+            user_model.UserAccountHistory.event_type == "DSC",
+            func.now()
+            > user_model.UserAccountHistory.created_at + timedelta(minutes=5),
+        )
+        .all()
     )
 
 

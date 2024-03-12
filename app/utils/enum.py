@@ -128,6 +128,7 @@ class UserContentReportDetailStatusEnum(str, Enum):
     UNDER_REVIEW = "URV"
     CLOSED = "CSD"
     RESOLVED = "RSD"
+    RESOLVED_RELATED = "RSR"
 
 
 class UserContentAppealDetailStatusEnum(str, Enum):
@@ -138,8 +139,24 @@ class UserContentAppealDetailStatusEnum(str, Enum):
     OPEN = "OPN"
     UNDER_REVIEW = "URV"
     ACCEPTED = "ACP"
+    ACCEPTED_RELATED = "ACR"
     REJECTED = "REJ"
     CLOSED = "CSD"
+
+
+class UserAccountHistoryEventTypeEnum(str, Enum):
+    """
+    Enum for useraccounthistory event_type values 'changed', 'removed', 'created', 'deactivated', 'delete_scheduled', 'deleted', 'reactivated', 'restored'
+    """
+
+    CHANGED = "CNG"
+    REMOVED = "RMV"
+    CREATED = "CRT"
+    DEACTIVATED = "DAV"
+    DELETE_SCHEDULED = "DSC"
+    DELETED = "DEL"
+    REACTIVATED = "RAV"
+    RESTORED = "RST"
 
 
 class EmployeeStatusEnum(str, Enum):

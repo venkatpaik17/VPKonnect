@@ -80,6 +80,7 @@ class User(Base):
         nullable=False,
         server_default=func.gen_random_uuid(),
     )
+    inactive_delete_after = Column(Integer, nullable=False, server_default=text("6"))
 
     followers = relationship(
         "UserFollowAssociation",
@@ -154,3 +155,25 @@ class UserSession(Base):
     )
     is_active = Column(Boolean, nullable=False, server_default=text("True"))
     session_user = relationship("User", back_populates="sessions")
+
+
+class UserAccountHistory(Base):
+    __tablename__ = "user_account_history"
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.generate_ulid(),
+    )
+    account_detail_type = Column(String(), nullable=False)
+    event_type = Column(String(), nullable=False)
+    new_detail_value = Column(String(), nullable=True)
+    previous_detail_value = Column(String(), nullable=True)
+    device_info = Column(String(), nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )

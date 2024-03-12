@@ -1720,13 +1720,16 @@ def appeal_content(
                 detail="Appeal content report entry not found",
             )
 
-    ban_report_entry = restrict_ban_entry or report_entry
+    ban_report_id = restrict_ban_entry or report_entry  # type: ignore
+    if restrict_ban_entry:
+        ban_report_id = restrict_ban_entry.report_id
+    elif report_entry:
+        ban_report_id = report_entry.id
 
     # add the appeal
     new_appeal = admin_model.UserContentRestrictBanAppealDetail(
         user_id=appeal_user.id,
-        user_status=appeal_user_request.user_status,
-        ban_report_id=ban_report_entry.id,
+        report_id=ban_report_id,
         content_type=appeal_user_request.content_type,
         content_id=appeal_user_request.content_id,
         appeal_detail=appeal_user_request.detail,

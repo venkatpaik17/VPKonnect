@@ -154,7 +154,20 @@ def get_restricted_users_duration_expired_query(db_session: Session):
         func.now()
         > (
             admin_model.UserRestrictBanDetail.enforce_action_at
-            + timedelta(hours=admin_model.UserRestrictBanDetail.duration)  # type: ignore
+            + (admin_model.UserRestrictBanDetail.duration * timedelta(hours=1))
+        ),
+    )
+
+
+def get_temp_banned_users_duration_expired_query(db_session: Session):
+    return db_session.query(admin_model.UserRestrictBanDetail).filter(
+        admin_model.UserRestrictBanDetail.status.in_(["TBN"]),
+        admin_model.UserRestrictBanDetail.is_active == True,
+        admin_model.UserRestrictBanDetail.is_deleted == False,
+        func.now()
+        > (
+            admin_model.UserRestrictBanDetail.enforce_action_at
+            + admin_model.UserRestrictBanDetail.duration * timedelta(hours=1)
         ),
     )
 
@@ -170,6 +183,37 @@ def get_user_active_restrict_ban_entry(
             admin_model.UserRestrictBanDetail.status.in_(status_in_list),
             admin_model.UserRestrictBanDetail.is_active == True,
             admin_model.UserRestrictBanDetail.is_deleted == False,
+        )
+        .first()
+    )
+
+
+# get user active restrict/ban entry using userid, reportid
+def get_user_active_restrict_ban_entry_user_id_report_id(
+    user_id: str, status: str, report_id: str, db_session: Session
+):
+    return (
+        db_session.query(admin_model.UserRestrictBanDetail)
+        .filter(
+            admin_model.UserRestrictBanDetail.user_id == user_id,
+            admin_model.UserRestrictBanDetail.status == status,
+            admin_model.UserRestrictBanDetail.report_id == report_id,
+            admin_model.UserRestrictBanDetail.is_active == True,
+            admin_model.UserRestrictBanDetail.is_deleted == False,
+        )
+        .first()
+    )
+
+
+# get last_added_score
+def get_last_added_score(score_id: str, report_id: str, db_session: Session):
+    return (
+        db_session.query(admin_model.GuidelineViolationLastAddedScore)
+        .filter(
+            admin_model.GuidelineViolationLastAddedScore.score_id == score_id,
+            admin_model.GuidelineViolationLastAddedScore.report_id == report_id,
+            admin_model.GuidelineViolationLastAddedScore.is_removed == False,
+            admin_model.GuidelineViolationLastAddedScore.is_deleted == False,
         )
         .first()
     )

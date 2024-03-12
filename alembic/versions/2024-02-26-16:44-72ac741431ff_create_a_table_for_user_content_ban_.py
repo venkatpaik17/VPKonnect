@@ -36,13 +36,7 @@ def upgrade() -> None:
             server_default=sa.func.get_next_value_from_sequence_ban_appeal_table(),
         ),
         sa.Column("user_id", UUID(as_uuid=True), nullable=False),
-        sa.Column(
-            "user_status",
-            sa.String(length=3),
-            nullable=False,
-            server_default=sa.text("'ACT'"),
-        ),
-        sa.Column("ban_report_id", UUID(as_uuid=True), nullable=False),
+        sa.Column("report_id", UUID(as_uuid=True), nullable=False),
         sa.Column("content_type", sa.String(), nullable=False),
         sa.Column("content_id", UUID(as_uuid=True), nullable=False),
         sa.Column("appeal_detail", sa.String(), nullable=False),
@@ -73,6 +67,9 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["user_id"], ["user.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["moderator_id"], ["employee.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["report_id"], ["user_content_report_detail.id"], ondelete="CASCADE"
+        ),
         sa.UniqueConstraint("case_number"),
     )
 

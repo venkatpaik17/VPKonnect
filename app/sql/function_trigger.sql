@@ -432,7 +432,7 @@ EXECUTE FUNCTION insert_report_event_timeline('REV');
 CREATE TRIGGER user_content_report_resolve_event_trigger
 AFTER UPDATE on "user_content_report_detail"
 FOR EACH ROW
-WHEN (OLD.reported_item_type IN ('post', 'comment', 'message') AND (OLD.status = 'URV' AND NEW.status = 'RSD'))
+WHEN (OLD.reported_item_type IN ('post', 'comment', 'message') AND (OLD.status = 'URV' AND NEW.status IN ('RSD', 'RSR')))
 EXECUTE FUNCTION insert_report_event_timeline('RES');
 
 CREATE TRIGGER user_content_report_close_event_trigger
@@ -489,7 +489,7 @@ EXECUTE FUNCTION insert_report_event_timeline_account_resolve();
 CREATE TRIGGER user_content_report_account_resolve_event_insert_trigger
 AFTER INSERT on "user_restrict_ban_detail"
 FOR EACH ROW
-WHEN (NEW.content_type = 'account')
+WHEN (NEW.content_type = 'account' AND NEW.is_active = TRUE)
 EXECUTE FUNCTION insert_report_event_timeline_account_resolve();
 
 

@@ -1,5 +1,3 @@
-from http import server
-
 from sqlalchemy import (
     TIMESTAMP,
     BigInteger,
@@ -187,7 +185,11 @@ class GuidelineViolationScore(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
     )
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
-    last_added_score = Column(Integer(), nullable=False, server_default=text("0"))
+    # last_added_score = Column(Integer(), nullable=False, server_default=text("0"))
+
+    last_added_scores = relationship(
+        "GuidelineViolationLastAddedScore", back_populates="score"
+    )
 
 
 class UserContentRestrictBanAppealDetail(Base):
@@ -206,7 +208,9 @@ class UserContentRestrictBanAppealDetail(Base):
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
-    ban_report_id = Column(UUID(as_uuid=True), nullable=False)
+    report_id = Column(
+        UUID(as_uuid=True), ForeignKey("user_content_report_detail.id"), nullable=False
+    )
     content_type = Column(String(), nullable=False)
     content_id = Column(UUID(as_uuid=True), nullable=False)
     appeal_detail = Column(String(), nullable=False)
@@ -226,23 +230,6 @@ class UserContentRestrictBanAppealDetail(Base):
         TIMESTAMP(timezone=True),
         nullable=True,
         onupdate=func.now(),
-    )
-
-    ban = relationship(
-        "UserRestrictBanDetail",
-        foreign_keys=[ban_report_id],
-        primaryjoin="and_(UserContentRestrictBanAppealDetail.content_type=='account', UserContentRestrictBanAppealDetail.ban_report_id==UserRestrictBanDetail.id)",
-        single_parent=True,
-        cascade="all, delete-orphan",
-    )
-
-    report = relationship(
-        "UserContentReportDetail",
-        foreign_keys=[ban_report_id],
-        primaryjoin="and_(or_(UserContentRestrictBanAppealDetail.content_type=='post', UserContentRestrictBanAppealDetail.content_type=='comment'), UserContentRestrictBanAppealDetail.ban_report_id==UserContentReportDetail.id)",
-        overlaps="ban",
-        single_parent=True,
-        cascade="all, delete-orphan",
     )
 
     post = relationship(
@@ -269,3 +256,53 @@ class UserContentRestrictBanAppealDetail(Base):
         single_parent=True,
         cascade="all, delete-orphan",
     )
+
+
+class AppealRestrictJoinView(Base):
+    __tablename__ = "appeal_restrict_join_view"
+    id = Column(BigInteger(), primary_key=True)
+    user_id = Column(UUID(as_uuid=True))
+    report_id = Column(UUID(as_uuid=True))
+    appeal_content_type = Column(String())
+    appeal_content_id = Column(UUID(as_uuid=True))
+    appeal_status = Column(String(length=3))
+    user_restrict_ban_status = Column(String(length=3))
+    user_restrict_ban_duration = Column(Integer())
+    user_restrict_ban_is_deleted = Column(Boolean())
+    user_restrict_ban_is_active = Column(Boolean())
+    user_restrict_ban_content_type = Column(String())
+    user_restrict_ban_content_id = Column(UUID(as_uuid=True))
+
+
+class GuidelineViolationLastAddedScore(Base):
+    __tablename__ = "guideline_violation_last_added_score"
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.generate_ulid(),
+    )
+    last_added_score = Column(Integer(), nullable=False)
+    is_removed = Column(Boolean(), nullable=False, server_default=text("False"))
+    is_deleted = Column(Boolean(), nullable=False, server_default=text("False"))
+    score_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("guideline_violation_score.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    report_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("user_content_report_detail.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        server_default=text("NOW()"),
+        nullable=False,
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        onupdate=func.now(),
+    )
+
+    score = relationship("GuidelineViolationScore", back_populates="last_added_scores")

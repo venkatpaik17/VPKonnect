@@ -57,7 +57,7 @@ class ReportUnderReviewUpdate(BaseModel):
 
 class EnforceReportActionAuto(BaseModel):
     case_number: int
-    reported_user_id: UUID
+    reported_username: UUID
     reported_item_type: str
     reported_item_id: UUID
     report_reason: str
@@ -66,3 +66,14 @@ class EnforceReportActionAuto(BaseModel):
 class EnforceReportActionManual(EnforceReportActionAuto):
     action: str
     duration: int
+    contents_to_be_banned: list[UUID] | None
+
+
+class AppealAction(BaseModel):
+    case_number: int
+    user_id: UUID
+    report_id: UUID
+    content_type: str
+    content_id: UUID
+    action: str
+    moderator_id: UUID

@@ -1,4 +1,5 @@
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -47,12 +48,24 @@ scheduler = BackgroundScheduler()
 @app.on_event("startup")
 def scheduler_init():
     scheduler.add_job(
-        job_task_utils.delete_user_after_deactivation_period_expiration,
-        trigger="cron",
-        hour=5,
-        minute=30,
-        second=0,
-        timezone="UTC",
+        func=job_task_utils.delete_user_after_deactivation_period_expiration,
+        trigger=IntervalTrigger(seconds=3),
+    )
+    scheduler.add_job(
+        func=job_task_utils.remove_restriction_on_user_after_duration_expiration,
+        trigger=IntervalTrigger(seconds=5),
+    )
+    scheduler.add_job(
+        func=job_task_utils.remove_ban_on_user_after_duration_expiration,
+        trigger=IntervalTrigger(seconds=5),
+    )
+    scheduler.add_job(
+        func=job_task_utils.user_inactivity_inactive,
+        trigger=IntervalTrigger(seconds=3),
+    )
+    scheduler.add_job(
+        func=job_task_utils.user_inactivity_delete,
+        trigger=IntervalTrigger(seconds=3),
     )
     scheduler.start()
 

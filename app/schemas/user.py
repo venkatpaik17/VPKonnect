@@ -147,5 +147,4 @@ class UserContentAppeal(BaseModel):
     email: EmailStr
     content_type: str
     content_id: UUID | None
-    user_status: str | None
     detail: str
