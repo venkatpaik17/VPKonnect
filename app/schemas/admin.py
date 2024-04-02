@@ -23,16 +23,33 @@ class ReportRequest(BaseModel):
 class ReportResponse(ReportRequest):
     reporter_user: user_schema.UserOutput
     reported_user: user_schema.UserOutput
+    reported_item_type: str
     reported_item: (
         post_schema.PostOutput | comment_schema.CommentOutput | user_schema.UserOutput
     )
-    reported_item_type: str
     case_number: int
     report_reason: str
     report_reason_user: user_schema.UserOutput | None
     moderator_note: str | None
     moderator: employee_schema.EmployeeOutput | None
     reported_at: datetime
+
+    @classmethod
+    def parse_obj(cls, obj):
+        print("parse_obj")
+        reported_item_type = obj["reported_item_type"]
+        reported_item_data = obj["reported_item"]
+
+        if reported_item_type == "post":
+            reported_item = post_schema.PostOutput(**reported_item_data)
+        elif reported_item_type == "comment":
+            reported_item = comment_schema.CommentOutput(**reported_item_data)
+        else:
+            reported_item = user_schema.UserOutput(**reported_item_data)
+
+        obj["reported_item"] = reported_item
+
+        return super().parse_obj(obj)
 
     class Config:
         orm_mode = True
@@ -57,16 +74,20 @@ class ReportUnderReviewUpdate(BaseModel):
 
 class EnforceReportActionAuto(BaseModel):
     case_number: int
-    reported_username: UUID
-    reported_item_type: str
-    reported_item_id: UUID
-    report_reason: str
+    reported_username: str
+    moderator_emp_id: str
 
 
 class EnforceReportActionManual(EnforceReportActionAuto):
     action: str
     duration: int
     contents_to_be_banned: list[UUID] | None
+
+
+class CloseReport(BaseModel):
+    reported_username: str
+    moderator_note: str
+    moderator_emp_id: str
 
 
 class AppealAction(BaseModel):

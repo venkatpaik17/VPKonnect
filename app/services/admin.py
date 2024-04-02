@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from uuid import UUID
 
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -105,6 +106,14 @@ def get_a_report_by_content_id_user_id(
     )
 
 
+def get_a_report_by_report_id_query(report_id: str, status: str, db_session: Session):
+    return db_session.query(admin_model.UserContentReportDetail).filter(
+        admin_model.UserContentReportDetail.id == report_id,
+        admin_model.UserContentReportDetail.status == status,
+        admin_model.UserContentReportDetail.is_deleted == False,
+    )
+
+
 def get_user_guideline_violation_score_query(user_id: str, db_session: Session):
     return db_session.query(admin_model.GuidelineViolationScore).filter(
         admin_model.GuidelineViolationScore.user_id == user_id
@@ -134,6 +143,7 @@ def get_related_reports_for_specific_report_query(
     reported_item_id: str,
     reported_item_type: str,
     status: str,
+    moderator_id: UUID,
     db_session: Session,
 ):
     return db_session.query(admin_model.UserContentReportDetail).filter(
@@ -142,6 +152,7 @@ def get_related_reports_for_specific_report_query(
         admin_model.UserContentReportDetail.reported_item_id == reported_item_id,
         admin_model.UserContentReportDetail.reported_item_type == reported_item_type,
         admin_model.UserContentReportDetail.status == status,
+        admin_model.UserContentReportDetail.moderator_id == moderator_id,
         admin_model.UserContentReportDetail.is_deleted == False,
     )
 
@@ -152,7 +163,7 @@ def get_restricted_users_duration_expired_query(db_session: Session):
         admin_model.UserRestrictBanDetail.is_active == True,
         admin_model.UserRestrictBanDetail.is_deleted == False,
         func.now()
-        > (
+        >= (
             admin_model.UserRestrictBanDetail.enforce_action_at
             + (admin_model.UserRestrictBanDetail.duration * timedelta(hours=1))
         ),
@@ -165,7 +176,7 @@ def get_temp_banned_users_duration_expired_query(db_session: Session):
         admin_model.UserRestrictBanDetail.is_active == True,
         admin_model.UserRestrictBanDetail.is_deleted == False,
         func.now()
-        > (
+        >= (
             admin_model.UserRestrictBanDetail.enforce_action_at
             + admin_model.UserRestrictBanDetail.duration * timedelta(hours=1)
         ),
@@ -206,7 +217,9 @@ def get_user_active_restrict_ban_entry_user_id_report_id(
 
 
 # get last_added_score
-def get_last_added_score(score_id: str, report_id: str, db_session: Session):
+def get_last_added_score(
+    score_id: str, report_id: str, db_session: Session, is_added: bool = True
+):
     return (
         db_session.query(admin_model.GuidelineViolationLastAddedScore)
         .filter(
@@ -214,6 +227,18 @@ def get_last_added_score(score_id: str, report_id: str, db_session: Session):
             admin_model.GuidelineViolationLastAddedScore.report_id == report_id,
             admin_model.GuidelineViolationLastAddedScore.is_removed == False,
             admin_model.GuidelineViolationLastAddedScore.is_deleted == False,
+            admin_model.GuidelineViolationLastAddedScore.is_added == is_added,
+        )
+        .first()
+    )
+
+
+def get_valid_flagged_content_account_report(report_id: str, db_session: Session):
+    return (
+        db_session.query(admin_model.AccountReportFlaggedContent.valid_flagged_content)
+        .filter(
+            admin_model.AccountReportFlaggedContent.report_id == report_id,
+            admin_model.AccountReportFlaggedContent.is_deleted == False,
         )
         .first()
     )

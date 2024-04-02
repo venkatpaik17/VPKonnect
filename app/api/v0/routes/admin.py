@@ -1,9 +1,6 @@
-from datetime import date, datetime, timedelta
-from email import message
+from datetime import date, timedelta
 from math import floor, inf
-from uuid import UUID
 
-import pytz
 from fastapi import APIRouter, Depends, Form, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
@@ -107,7 +104,7 @@ def get_reported_items(
 
 
 # get a report
-@router.get("/reports/{case_number}", response_model=admin_schema.ReportResponse)
+@router.get("/reports/{case_number}")
 def get_requested_report(
     case_number: int,
     report_request: admin_schema.ReportRequest,
@@ -132,31 +129,58 @@ def get_requested_report(
 
     # get the required objects (User, Post, Comment) and other parameters
     # prepare the response object
-    report_response = admin_schema.ReportResponse(
-        reporter_user=requested_report.reporter_user.__dict__,
-        reported_user=requested_report.reported_user.__dict__,
-        reported_item=(
+    # report_response = admin_schema.ReportResponse(
+    #     reporter_user=requested_report.reporter_user.__dict__,
+    #     reported_user=requested_report.reported_user.__dict__,
+    #     reported_item_type=requested_report.reported_item_type,
+    #     reported_item=(
+    #         (requested_report.post.__dict__ if requested_report.post else None)
+    #         or (requested_report.comment.__dict__ if requested_report.comment else None)
+    #         or requested_report.account.__dict__
+    #     ),
+    #     case_number=requested_report.case_number,
+    #     report_reason=map_utils.report_reasons_code_dict.get(requested_report.report_reason),  # type: ignore
+    #     report_reason_user=(
+    #         requested_report.report_reason_user.__dict__
+    #         if requested_report.report_reason_user
+    #         else None
+    #     ),
+    #     status=requested_report.status,
+    #     moderator_note=requested_report.moderator_note,
+    #     moderator=(
+    #         requested_report.moderator.__dict__ if requested_report.moderator else None
+    #     ),
+    #     reported_at=requested_report.created_at,
+    # )
+
+    # we create the dict and then parse it using overriding parse_obj function on ReportResponse schema
+    requested_report_data = {
+        "reporter_user": requested_report.reporter_user.__dict__,
+        "reported_user": requested_report.reported_user.__dict__,
+        "reported_item_type": requested_report.reported_item_type,
+        "reported_item": (
             (requested_report.post.__dict__ if requested_report.post else None)
             or (requested_report.comment.__dict__ if requested_report.comment else None)
             or requested_report.account.__dict__
         ),
-        reported_item_type=requested_report.reported_item_type,
-        case_number=requested_report.case_number,
-        report_reason=map_utils.report_reasons_code_dict.get(requested_report.report_reason),  # type: ignore
-        report_reason_user=(
+        "case_number": requested_report.case_number,
+        "report_reason": map_utils.report_reasons_code_dict.get(
+            requested_report.report_reason
+        ),
+        "report_reason_user": (
             requested_report.report_reason_user.__dict__
             if requested_report.report_reason_user
             else None
         ),
-        status=requested_report.status,
-        moderator_note=requested_report.moderator_note,
-        moderator=(
+        "status": requested_report.status,
+        "moderator_note": requested_report.moderator_note,
+        "moderator": (
             requested_report.moderator.__dict__ if requested_report.moderator else None
         ),
-        reported_at=requested_report.created_at,
-    )
+        "reported_at": requested_report.created_at,
+    }
 
-    return report_response
+    return admin_schema.ReportResponse.parse_obj(requested_report_data)
 
 
 # get all other open reports related to a particular content report
@@ -172,7 +196,9 @@ def get_all_related_open_reports_for_specific_report(
     ),
 ):
     # get the report using case_number
-    specific_report = admin_service.get_a_report(case_number, "OPN", db)
+    specific_report = admin_service.get_a_report(
+        case_number, "OPN", db
+    ) or admin_service.get_a_report(case_number, "URV", db)
     if not specific_report:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Specific report not found"
@@ -222,7 +248,7 @@ def selected_reports_under_review_update(
     for case_no in reports_request.case_number_list:
         get_report_query = admin_service.get_a_report_query(case_no, "OPN", db)
         get_report = get_report_query.first()
-        print(get_report.__dict__)
+        # print(get_report.__dict__)
         if not get_report:
             invalid_reports.append(case_no)
         else:
@@ -254,6 +280,18 @@ def enforce_report_action_auto(
         auth_utils.AccessRoleDependency(role="content_mgmt")
     ),
 ):
+    # get current employee
+    curr_employee = employee_service.get_employee_by_work_email(
+        work_email=str(current_employee.email), db_session=db
+    )
+
+    # check identity
+    if curr_employee and (action_request.moderator_emp_id != curr_employee.emp_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
     # get the report from case number
     report_query = admin_service.get_a_report_query(
         action_request.case_number, "URV", db
@@ -266,9 +304,15 @@ def enforce_report_action_auto(
         )
 
     # check if the content exists or not
-    if action_request.reported_item_type == "post":
+    if report.reported_item_type == "account":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Requested action cannot be performed. Please use Manual Action",
+        )
+
+    elif report.reported_item_type == "post":
         post_query = post_service.get_a_post_query(
-            str(action_request.reported_item_id), ["DRF", "DEL"], db
+            str(report.reported_item_id), ["DRF", "DEL", "FLD"], db
         )
         post = post_query.first()
         if not post:
@@ -280,10 +324,15 @@ def enforce_report_action_auto(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Reported post already banned",
             )
+        if post.status == "FLB":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reported post already flagged to be banned",
+            )
 
-    elif action_request.reported_item_type == "comment":
+    elif report.reported_item_type == "comment":
         comment_query = comment_service.get_a_comment_query(
-            str(action_request.reported_item_id), ["DEL"], db
+            str(report.reported_item_id), ["DEL"], db
         )
         comment = comment_query.first()
         if not comment:
@@ -296,12 +345,11 @@ def enforce_report_action_auto(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Reported comment already banned",
             )
-
-    elif action_request.reported_item_type == "account":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Requested action cannot be performed. Please use Manual Action",
-        )
+        if comment.status == "FLB":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reported comment already flagged to be banned",
+            )
 
     # get reported user
     reported_user_query = user_service.get_user_by_username_query(
@@ -330,7 +378,7 @@ def enforce_report_action_auto(
 
     # map report reason to severity group
     severity_group = map_utils.report_reasons_severity_group_dict.get(
-        action_request.report_reason
+        report.report_reason
     )
     if not severity_group:
         raise HTTPException(
@@ -351,9 +399,7 @@ def enforce_report_action_auto(
         )
 
     # map content type to weights
-    content_weight = map_utils.content_weigths_dict.get(
-        action_request.reported_item_type
-    )
+    content_weight = map_utils.content_weigths_dict.get(report.reported_item_type)
     if not content_weight:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Content weight not found"
@@ -401,18 +447,19 @@ def enforce_report_action_auto(
     # set the score_type and get curr_score for the content type
     score_type = None
     curr_score = None
-    if action_request.reported_item_type == "post":
+    if report.reported_item_type == "post":
         score_type = "post_score"
         curr_score = user_guideline_violation_score.post_score
-    elif action_request.reported_item_type == "comment":
+    elif report.reported_item_type == "comment":
         score_type = "comment_score"
         curr_score = user_guideline_violation_score.comment_score
     else:
         score_type = "message_score"
         curr_score = user_guideline_violation_score.message_score
 
-    # For no action, update user_content_report_detail,  and guideline_violation_score tables
-    # For action, update user_restrict_ban_detail, user_content_report_detail, user_content_report_event_timeline using trigger, guideline_violation_score and user tables
+    # For no action, update user_content_report_detail, user_content_report_event_timeline using trigger and guideline_violation_score, guideline_violation_last_added_score tables
+    # For action, update user_restrict_ban_detail, user_content_report_detail
+    # If active action then update user_content_report_event_timeline using trigger, guideline_violation_score, guideline_violation_last_added_score and user tables
     # so updating user_content_report_detail, user_content_report_event_timeline using trigger and guideline_violation_score tables are common operations for both
     # also another common operation is to handle other under review reports if any, related to this content report, they need to be closed.
     message = None
@@ -444,6 +491,7 @@ def enforce_report_action_auto(
         new_user_retrict_ban = None
         is_active = None
         enforce_action_at = None
+
         # there is a active restrict/ban and also there is/are future restricts/bans in line
         if user_active_restrict_ban and user_future_restrict_ban:
             enforce_time = user_future_restrict_ban.enforce_action_at + timedelta(
@@ -451,6 +499,7 @@ def enforce_report_action_auto(
             )
             is_active = False
             enforce_action_at = enforce_time
+
         # there is a active restrict/ban and also there is/are no future restricts/bans in line
         elif user_active_restrict_ban and not user_future_restrict_ban:
             enforce_time = user_active_restrict_ban.enforce_action_at + timedelta(
@@ -458,6 +507,7 @@ def enforce_report_action_auto(
             )
             is_active = False
             enforce_action_at = enforce_time
+
         # no active restrict/ban
         elif not user_active_restrict_ban:
             is_active = True
@@ -468,8 +518,8 @@ def enforce_report_action_auto(
             duration=action_duration[1],
             user_id=reported_user.id,
             is_active=is_active,
-            content_type=action_request.reported_item_type,
-            content_id=action_request.reported_item_id,
+            content_type=report.reported_item_type,
+            content_id=report.reported_item_id,
             report_id=report.id,
             enforce_action_at=enforce_action_at,
         )
@@ -478,7 +528,7 @@ def enforce_report_action_auto(
             # add restrict/ban entry
             db.add(new_user_retrict_ban)
 
-            # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or user is deactivated/inactive and action is PBN, else don't update
+            # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or user is deactivated/inactive and action is PBN), else don't update
             if new_user_retrict_ban.is_active and (
                 not user_deactivated_inactive
                 or (user_deactivated_inactive and action_duration[0] == "PBN")
@@ -489,6 +539,7 @@ def enforce_report_action_auto(
                 reported_user.status = action_duration[0]
 
             db.commit()
+
         except SQLAlchemyError as exc:
             print(exc)
             db.rollback()
@@ -499,35 +550,83 @@ def enforce_report_action_auto(
 
         message = f"Request processed successfully. Appropriate action taken. Report case number {action_request.case_number} resolved."
 
+    # setting flag, to check if (no action or active action) or (action and future active)
+    no_action_or_active_action = None
+    if no_action or (not no_action and is_active):
+        no_action_or_active_action = True
+    elif not no_action and not is_active:
+        no_action_or_active_action = False
+
     # common operations for both action and no action
     try:
-        report_query.update(
-            {"status": "RSD", "moderator_note": "RS"}, synchronize_session=False
-        )
-        user_guideline_violation_score_query.update(
-            {
-                score_type: curr_score + effective_score,
-                "final_violation_score": new_final_violation_score,
-                # "last_added_score": effective_score,
-            },
-            synchronize_session=False,
-        )
-        user_guideline_violation_score.last_added_scores.append(
-            admin_model.GuidelineViolationLastAddedScore(
-                last_added_score=effective_score,
-                score_id=user_guideline_violation_score.id,
-                report_id=report.id,
+        # if no action or active restrict/ban
+        if no_action_or_active_action:
+            # update report to resolved
+            report_query.update(
+                {"status": "RSD", "moderator_note": "RS"}, synchronize_session=False
             )
-        )
 
+            # update scores
+            user_guideline_violation_score_query.update(
+                {
+                    score_type: curr_score + effective_score,
+                    "final_violation_score": new_final_violation_score,
+                    # "last_added_score": effective_score,
+                },
+                synchronize_session=False,
+            )
+
+            # last added score entry
+            user_guideline_violation_score.last_added_scores.append(
+                admin_model.GuidelineViolationLastAddedScore(
+                    last_added_score=effective_score,
+                    score_id=user_guideline_violation_score.id,
+                    report_id=report.id,
+                )
+            )
+
+            # ban content
+            content_to_be_deleted = post_query or comment_query  # type: ignore
+            content_to_be_deleted.update(
+                {"status": "BAN"},
+                synchronize_session=False,
+            )
+
+        # if future action
+        else:
+            # update report status to future resolve
+            report_query.update(
+                {"status": "FRS", "moderator_note": "RS"}, synchronize_session=False
+            )
+
+            # we don't update the scores now, it will be updated when the action is active in future
+            # last added score entry with is_active False
+            user_guideline_violation_score.last_added_scores.append(
+                admin_model.GuidelineViolationLastAddedScore(
+                    last_added_score=effective_score,
+                    score_id=user_guideline_violation_score.id,
+                    report_id=report.id,
+                    is_added=False,
+                )
+            )
+
+            # flag content
+            content_to_be_deleted = post_query or comment_query  # type: ignore
+            content_to_be_deleted.update(
+                {"status": "FLB"},
+                synchronize_session=False,
+            )
+
+        # handled seperately
         # get related under review reports
         related_reports_query = (
             admin_service.get_related_reports_for_specific_report_query(
                 case_number=action_request.case_number,
                 reported_user_id=str(reported_user.id),
-                reported_item_id=str(action_request.reported_item_id),
-                reported_item_type=action_request.reported_item_type,
+                reported_item_id=str(report.reported_item_id),
+                reported_item_type=report.reported_item_type,
                 status="URV",
+                moderator_id=curr_employee.id,
                 db_session=db,
             )
         )
@@ -535,26 +634,16 @@ def enforce_report_action_auto(
         if related_reports:
             # check if other related reports have same report reason, if yes, resolve those, else close
             for related_report in related_reports:
-                if related_report.report_reason == action_request.report_reason:
-                    related_reports_query.update(
-                        {"status": "RSR", "moderator_note": "RS"},
-                        synchronize_session=False,
-                    )
+                if related_report.report_reason == report.report_reason:
+                    if no_action_or_active_action:
+                        related_report.status = "RSR"
+                        related_report.moderator_note = "RS"
+                    else:
+                        related_report.status = "FRR"
+                        related_report.moderator_note = "RS"
                 else:
-                    related_reports_query.update(
-                        {"status": "CSD", "moderator_note": "RF"},
-                        synchronize_session=False,
-                    )
-
-        # ban content only if it is post/comment
-        # this is for no action or action enforced now, not for future enforce
-        if no_action or (not no_action and new_user_retrict_ban.is_active):
-            content_to_be_deleted = post_query or comment_query  # type: ignore
-            # ban the content
-            content_to_be_deleted.update(
-                {"status": "BAN"},
-                synchronize_session=False,
-            )
+                    related_report.status = "CSD"
+                    related_report.moderator_note = "RF"
 
         db.commit()
     except SQLAlchemyError as exc:
@@ -565,7 +654,15 @@ def enforce_report_action_auto(
             detail="Error processing request",
         ) from exc
 
-    return message
+    moderator_note_full = map_utils.create_violation_moderator_notes(
+        username=reported_user.username,
+        moderator_note=report.moderator_note,
+        case_number=action_request.case_number,
+        content_type=report.reported_item_type,
+        report_reason=report.report_reason,
+    )
+
+    return {"message": message, "detail": moderator_note_full}
 
 
 # use this mainly for account reports
@@ -578,6 +675,18 @@ def enforce_report_action_manual(
         auth_utils.AccessRoleDependency(role="content_mgmt")
     ),
 ):
+    # get current employee
+    curr_employee = employee_service.get_employee_by_work_email(
+        work_email=str(current_employee.email), db_session=db
+    )
+
+    # check identity
+    if curr_employee and (action_request.moderator_emp_id != curr_employee.emp_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
     # get the report from case number
     report_query = admin_service.get_a_report_query(
         action_request.case_number, "URV", db
@@ -590,9 +699,9 @@ def enforce_report_action_manual(
         )
 
     # check if the content exists or not
-    if action_request.reported_item_type == "post":
+    if report.reported_item_type == "post":
         post_query = post_service.get_a_post_query(
-            str(action_request.reported_item_id), ["DRF", "DEL"], db
+            str(report.reported_item_id), ["DRF", "DEL"], db
         )
         post = post_query.first()
         if not post:
@@ -604,10 +713,15 @@ def enforce_report_action_manual(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Reported post already banned",
             )
+        if post.status == "FLB":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reported post already flagged to be banned",
+            )
 
-    elif action_request.reported_item_type == "comment":
+    elif report.reported_item_type == "comment":
         comment_query = comment_service.get_a_comment_query(
-            str(action_request.reported_item_id), ["DEL"], db
+            str(report.reported_item_id), ["DEL"], db
         )
         comment = comment_query.first()
         if not comment:
@@ -619,6 +733,11 @@ def enforce_report_action_manual(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Reported comment already banned",
+            )
+        if comment.status == "FLB":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reported comment already flagged to be banned",
             )
 
     # for reported_item_type account reported_item_id and reported_user.id is same. So reported_user and account is same
@@ -651,12 +770,14 @@ def enforce_report_action_manual(
         action_request.action,
         action_request.duration,
     )
+
     min_req_violation_score = map_utils.action_entry_score_dict.get(action_duration)  # type: ignore
     if not min_req_violation_score:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Minimum required violation score not found",
         )
+
     # fetch the current final violation score
     user_guideline_violation_score_query = (
         admin_service.get_user_guideline_violation_score_query(
@@ -675,13 +796,13 @@ def enforce_report_action_manual(
     )
 
     # set the score_type and get curr_score for the content type
-    if action_request.reported_item_type == "post":
+    if report.reported_item_type == "post":
         score_type = "post_score"
         curr_score = user_guideline_violation_score.post_score
-    elif action_request.reported_item_type == "comment":
+    elif report.reported_item_type == "comment":
         score_type = "comment_score"
         curr_score = user_guideline_violation_score.comment_score
-    elif action_request.reported_item_type == "message":
+    elif report.reported_item_type == "message":
         score_type = "message_score"
         curr_score = user_guideline_violation_score.message_score
     # if reported item type is account, then use post_score, as posts reflect most of the account
@@ -702,7 +823,7 @@ def enforce_report_action_manual(
 
     # update user_restrict_ban_detail, user_content_report_detail, user_content_report_event_timeline using trigger, guideline_violation_score and user tables
     # handle other under review reports if any, related to this content report, they need to be closed
-    # delete the content
+    # ban/falg the content
 
     # get all restrict/ban entries for a user
     user_all_restrict_ban_query = admin_service.get_all_user_restrict_ban_query(
@@ -719,6 +840,7 @@ def enforce_report_action_manual(
         user_all_restrict_ban_query.filter(
             admin_model.UserRestrictBanDetail.enforce_action_at > func.now(),
             admin_model.UserRestrictBanDetail.is_active == False,
+            admin_model.UserRestrictBanDetail.is_deleted == False,
         )
         .order_by(admin_model.UserRestrictBanDetail.enforce_action_at.desc())
         .first()
@@ -750,8 +872,8 @@ def enforce_report_action_manual(
         duration=action_duration[1],
         user_id=reported_user.id,
         is_active=is_active,
-        content_type=action_request.reported_item_type,
-        content_id=action_request.reported_item_id,
+        content_type=report.reported_item_type,
+        content_id=report.reported_item_id,
         report_id=report.id,
         enforce_action_at=enforce_action_at,
     )
@@ -760,98 +882,132 @@ def enforce_report_action_manual(
         # add restrict/ban entry
         db.add(new_user_retrict_ban)
 
-        # update report entry
-        # report_query.update(
-        #     {"status": "RSD", "moderator_note": "RS"}, synchronize_session=False
-        # )
-        report.status = "RSD"
-        report.moderator_note = "RS"
-
-        # update guideline violation score entry
-        user_guideline_violation_score_query.update(
-            {
-                score_type: new_content_score,
-                "final_violation_score": new_final_violation_score,
-                # "last_added_score": new_last_added_score,
-            },
-            synchronize_session=False,
-        )
-        user_guideline_violation_score.last_added_scores.append(
-            admin_model.GuidelineViolationLastAddedScore(
-                last_added_score=new_last_added_score,
-                score_id=user_guideline_violation_score.id,
-                report_id=report.id,
+        # if active action
+        if is_active:
+            report_query.update(
+                {"status": "RSD", "moderator_note": "RS"}, synchronize_session=False
             )
-        )
 
-        # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or user is deactivated/inactive and action is PBN, else don't update
-        if new_user_retrict_ban.is_active and (
-            not user_deactivated_inactive
-            or (user_deactivated_inactive and action_duration[0] == "PBN")
-        ):
-            # reported_user_query.update(
-            #     {"status": action_duration[0]}, synchronize_session=False
-            # )
-            reported_user.status = action_duration[0]
+            # update guideline violation score entry
+            user_guideline_violation_score_query.update(
+                {
+                    score_type: new_content_score,
+                    "final_violation_score": new_final_violation_score,
+                    # "last_added_score": new_last_added_score,
+                },
+                synchronize_session=False,
+            )
+
+            # last added score entry
+            user_guideline_violation_score.last_added_scores.append(
+                admin_model.GuidelineViolationLastAddedScore(
+                    last_added_score=new_last_added_score,
+                    score_id=user_guideline_violation_score.id,
+                    report_id=report.id,
+                )
+            )
+
+            # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or user is deactivated/inactive and action is PBN, else don't update
+            if not user_deactivated_inactive or (
+                user_deactivated_inactive and action_duration[0] == "PBN"
+            ):
+                # reported_user_query.update(
+                #     {"status": action_duration[0]}, synchronize_session=False
+                # )
+                reported_user.status = action_duration[0]
+
+            # ban content only if reported_item_type is post/comment
+            # only if is_active is True, meaning action is enforced now
+            if report.reported_item_type in ["post", "comment"]:
+                content_to_be_banned = post_query or comment_query  # type: ignore
+                # ban the content
+                content_to_be_banned.update(
+                    {"status": "BAN"},
+                    synchronize_session=False,
+                )
+
+        # if future action
+        else:
+            # update report status to future resolve
+            report_query.update(
+                {"status": "FRS", "moderator_note": "RS"}, synchronize_session=False
+            )
+
+            # last added score entry with is_active False
+            user_guideline_violation_score.last_added_scores.append(
+                admin_model.GuidelineViolationLastAddedScore(
+                    last_added_score=new_last_added_score,
+                    score_id=user_guideline_violation_score.id,
+                    report_id=report.id,
+                    is_added=False,
+                )
+            )
+
+            # flag content
+            # flag content only if reported_item_type is post/comment
+            if report.reported_item_type in ["post", "comment"]:
+                content_to_be_flagged_ban = post_query or comment_query  # type: ignore
+                content_to_be_flagged_ban.update(
+                    {"status": "FLB"},
+                    synchronize_session=False,
+                )
 
         # get related under review reports
         related_reports_query = (
             admin_service.get_related_reports_for_specific_report_query(
                 case_number=action_request.case_number,
                 reported_user_id=str(reported_user.id),
-                reported_item_id=str(action_request.reported_item_id),
-                reported_item_type=action_request.reported_item_type,
+                reported_item_id=str(report.reported_item_id),
+                reported_item_type=report.reported_item_type,
                 status="URV",
+                moderator_id=curr_employee.id,
                 db_session=db,
             )
         )
+
+        # handled seperately
         related_reports = related_reports_query.all()
         if related_reports:
             # check if other related reports have same report reason, if yes, resolve those, else close
             for related_report in related_reports:
-                if related_report.report_reason == action_request.report_reason:
-                    related_reports_query.update(
-                        {"status": "RSR", "moderator_note": "RS"},
-                        synchronize_session=False,
-                    )
+                if related_report.report_reason == report.report_reason:
+                    if is_active:
+                        related_report.status = "RSR"
+                        related_report.moderator_note = "RS"
+                    else:
+                        related_report.status = "FRR"
+                        related_report.moderator_note = "RS"
                 else:
-                    related_reports_query.update(
-                        {"status": "CSD", "moderator_note": "RF"},
-                        synchronize_session=False,
-                    )
+                    related_report.status = "CSD"
+                    related_report.moderator_note = "RF"
 
-        # ban content only if reported_item_type is post/comment
-        # only if is_active is True, meaning action is enforced now
-        if (
-            action_request.reported_item_type in ["post", "comment"]
-            and new_user_retrict_ban.is_active
-        ):
-            content_to_be_deleted = post_query or comment_query  # type: ignore
-            # delete the content
-            content_to_be_deleted.update(
-                {"status": "BAN"},
-                synchronize_session=False,
-            )
-
+        # handled seperately
         # ban the contents flagged by manual/auto process, if reported_item_type is account
         if (
-            action_request.reported_item_type == "account"
+            report.reported_item_type == "account"
             and action_request.contents_to_be_banned
         ):
             flagged_posts_not_found = []
+            valid_flagged_posts = []
             for post_id in action_request.contents_to_be_banned:
                 post_to_be_banned = post_service.get_a_post(
                     post_id=str(post_id),
-                    status_not_in_list=["DRF", "DEL", "BAN"],
+                    status_not_in_list=["DRF", "DEL", "BAN", "FLB", "FLD"],
                     db_session=db,
                 )
-                # if flagged post not found then append it to the list and skip the rest of the operations
+                # if flagged post not found then append it to the list and skip the rest of the operations, if found, then append to valid_flagged_posts
                 if not post_to_be_banned:
                     flagged_posts_not_found.append(post_id)
                     continue
+                else:
+                    valid_flagged_posts.append(post_id)
 
-                # flagged post if found, ban it
-                post_to_be_banned.status = "BAN"
+                # ban the flagged post if active action
+                # else, flag the post to be banned when action is enforced in future
+                if is_active:
+                    post_to_be_banned.status = "BAN"
+                else:
+                    post_to_be_banned.status = "FLB"
 
             # if all the flagegd posts are not found then we need to raise the exception for moderator to look up account again
             if len(flagged_posts_not_found) == len(
@@ -862,9 +1018,20 @@ def enforce_report_action_manual(
                     detail="All posts flagged to be banned not found",
                 )
 
+            # add the process-flagged post(s) (all and valid) to the account_report_flagged_content table
+            new_account_report_flagged_content = (
+                admin_model.AccountReportFlaggedContent(
+                    flagged_content=action_request.contents_to_be_banned,
+                    valid_flagged_content=valid_flagged_posts,
+                    report_id=report.id,
+                )
+            )
+            db.add(new_account_report_flagged_content)
+
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing request",
@@ -873,19 +1040,41 @@ def enforce_report_action_manual(
         db.rollback()
         raise exc
 
+    moderator_note_full = map_utils.create_violation_moderator_notes(
+        username=reported_user.username,
+        moderator_note=report.moderator_note,
+        case_number=action_request.case_number,
+        content_type=report.reported_item_type,
+        report_reason=report.report_reason,
+    )
+
     return {
-        "message": f"Request processed successfully. Requested action taken. Report case number {action_request.case_number} resolved."
+        "message": f"Request processed successfully. Requested action taken. Report case number {action_request.case_number} resolved.",
+        "detail": moderator_note_full,
     }
 
 
 @router.patch("/reports/{case_number}/close")
 def close_report(
     case_number: int,
+    close_request: admin_schema.CloseReport,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.AccessRoleDependency(role="content_mgmt")
     ),
 ):
+    # get current employee
+    curr_employee = employee_service.get_employee_by_work_email(
+        work_email=str(current_employee.email), db_session=db
+    )
+
+    # check identity
+    if curr_employee and (close_request.moderator_emp_id != curr_employee.emp_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
     # get the report from case number
     report_query = admin_service.get_a_report_query(case_number, "URV", db)
     report = report_query.first()
@@ -897,14 +1086,43 @@ def close_report(
 
     # update the report
     report_query.update(
-        {"status": "CSD", "moderator_note": "RF"},
+        {"status": "CSD", "moderator_note": close_request.moderator_note},
         synchronize_session=False,
     )
 
+    # get other related reports with same report reason, if any then update the status and moderator_note of the related reports same as the report
+    related_reports_query = admin_service.get_related_reports_for_specific_report_query(
+        case_number=case_number,
+        reported_user_id=str(report.reported_user_id),
+        reported_item_id=str(report.reported_item_id),
+        reported_item_type=report.reported_item_type,
+        status="URV",
+        moderator_id=curr_employee.id,
+        db_session=db,
+    )
+    related_reports_same_reason_query = related_reports_query.filter(
+        admin_model.UserContentReportDetail.report_reason == report.report_reason
+    )
+    related_reports_same_reason = related_reports_same_reason_query.all()
+
+    if related_reports_same_reason:
+        for related_report in related_reports_same_reason:
+            related_report.status = "CSD"
+            related_report.moderator_note = close_request.moderator_note
+
     db.commit()
 
+    moderator_note_full = map_utils.create_violation_moderator_notes(
+        username=close_request.reported_username,
+        moderator_note=close_request.moderator_note,
+        case_number=case_number,
+        content_type=report.reported_item_type,
+        report_reason=report.report_reason,
+    )
+
     return {
-        "message": f"Request processed successfully. No action taken. Report case number {case_number} closed."
+        "message": f"Request processed successfully. No action taken. Report case number {case_number} closed.",
+        "detail": moderator_note_full,
     }
 
 

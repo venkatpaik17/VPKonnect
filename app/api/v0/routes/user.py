@@ -1490,7 +1490,9 @@ def report_item(
 ):
     # check if item is there or not
     if reported_item.item_type == "post":
-        post = post_service.get_a_post(str(reported_item.item_id), ["DRF", "DEL"], db)
+        post = post_service.get_a_post(
+            str(reported_item.item_id), ["DRF", "DEL", "FLD"], db
+        )
         if not post:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
@@ -1500,8 +1502,16 @@ def report_item(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Post already banned",
             )
+        if post.status == "FLB":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reported post already flagged to be banned",
+            )
+
     elif reported_item.item_type == "comment":
-        comment = comment_service.get_a_comment(str(reported_item.item_id), ["DEL"], db)
+        comment = comment_service.get_a_comment(
+            str(reported_item.item_id), ["DEL", "FLD"], db
+        )
         if not comment:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
@@ -1510,6 +1520,11 @@ def report_item(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Comment already banned",
+            )
+        if comment.status == "FLB":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Reported comment already flagged to be banned",
             )
 
     # get the reporter and reported user
@@ -1624,39 +1639,43 @@ def appeal_content(
         appeal_user = user_service.get_user_by_username_email(
             username=appeal_user_request.username,
             email=appeal_user_request.email,
-            status_in_list=["TBN", "PBN", "RSP", "RSF"],
+            status_in_list=["TBN", "PBN", "RSP", "RSF", "PDB"],
             db_session=db,
         )
         if not appeal_user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Appeal user not banned or maybe deleted",
+                detail="Appeal user not restricted/banned or maybe deleted",
             )
 
         appeal_user_request.content_id = appeal_user.id
 
-        # check if 30 days appeal limit is crossed or not for PBN status
-        if appeal_user.status == "PBN":
-            user_ban_entry = (
-                db.query(admin_model.UserRestrictBanDetail.user_id)
-                .filter(
-                    admin_model.UserRestrictBanDetail.user_id == appeal_user.id,
-                    admin_model.UserRestrictBanDetail.status == appeal_user.status,
-                    (
-                        admin_model.UserRestrictBanDetail.enforce_action_at
-                        + timedelta(days=30)
-                    )
-                    < func.now(),
-                    admin_model.UserRestrictBanDetail.is_active == True,
-                    admin_model.UserRestrictBanDetail.is_deleted == False,
-                )
-                .first()
+        # check if 30 days appeal limit is crossed, status for this is PDB
+        if appeal_user.status == "PDB":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Your account has been permanently deleted because it did not follow our community guidelines. This decision cannot be reversed either because we have already reviewed it, or because 30 days have passed since your account was permanently banned.",
             )
-            if user_ban_entry:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Your account has been permanently deleted because it did not follow our community guidelines. This decision cannot be reversed either because we have already reviewed it, or because 30 days have passed since your account was permanently banned.",
-                )
+            # user_ban_entry = (
+            #     db.query(admin_model.UserRestrictBanDetail.user_id)
+            #     .filter(
+            #         admin_model.UserRestrictBanDetail.user_id == appeal_user.id,
+            #         admin_model.UserRestrictBanDetail.status == appeal_user.status,
+            #         (
+            #             admin_model.UserRestrictBanDetail.enforce_action_at
+            #             + timedelta(days=30)
+            #         )
+            #         < func.now(),
+            #         admin_model.UserRestrictBanDetail.is_active == True,
+            #         admin_model.UserRestrictBanDetail.is_deleted == False,
+            #     )
+            #     .first()
+            # )
+            # if user_ban_entry:
+            #     raise HTTPException(
+            #         status_code=status.HTTP_400_BAD_REQUEST,
+            #         detail="Your account has been permanently deleted because it did not follow our community guidelines. This decision cannot be reversed either because we have already reviewed it, or because 30 days have passed since your account was permanently banned.",
+            #     )
 
         # get the ban entry
         restrict_ban_entry = admin_service.get_user_active_restrict_ban_entry(

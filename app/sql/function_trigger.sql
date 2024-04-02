@@ -369,26 +369,25 @@ EXECUTE FUNCTION update_user_follow_association_status('delete');
 
 
 /* 
-#update the function to customize more
-# For content_type account, closed means 'No Action' instead of 'Not Removed'
-# For content_type account, we can't resolve directly, we need to check if the action is enforced now or later, also we need to know what action is enforced,
-  # so we need have a seperate trigger for handling that
-# this function and resolve trigger is only for post/comment/message
+Triggers and function to handle report events
+post/comment/message and account report events combined in one
+Close event has moderator_note considered for proper info
 */
 CREATE OR REPLACE FUNCTION insert_report_event_timeline()
 RETURNS TRIGGER AS $$
 DECLARE
     action TEXT;
-    content_type TEXT;
+    report_content_type TEXT;
     event TEXT;
     info TEXT;
+    
 BEGIN
     IF TG_NARGS <> 1 THEN
         RAISE EXCEPTION 'Wrong number of arguments for insert_report_event_timeline()';
     END IF;
     
-    action = TG_ARGV[0];
-    content_type = OLD.reported_item_type;
+    action := TG_ARGV[0];
+    report_content_type := OLD.reported_item_type;
     
     IF action = 'SUB' THEN
         event := 'Submitted';
@@ -397,14 +396,44 @@ BEGIN
         event := 'Under Review';
         info := 'Review in progress';
     ELSIF action = 'RES' THEN
+        DECLARE
+            user_status TEXT;
+        BEGIN
+            IF report_content_type = 'account' THEN
+                SELECT status INTO user_status FROM "user_restrict_ban_detail" WHERE user_id = OLD.reported_user_id AND content_id = OLD.reported_item_id AND content_type = OLD.reported_item_type AND is_active = TRUE;
+                IF user_status IN ('RSF', 'RSP') THEN
+                    info := 'account restricted';
+                ELSIF user_status = 'TBN' THEN
+                    info := 'account temp banned';
+                ELSIF user_status = 'PBN' THEN
+                    info := 'account perm banned';
+                END IF;
+            ELSE
+                info := report_content_type || ' Removed';
+            END IF;
+        END;
         event := 'Resolved';
-        info := content_type || ' Removed';
+        
     ELSIF action = 'CLS' THEN
-        IF content_type = 'account' THEN
-            info := content_type || ' No Action';
-        ELSE
-            info := content_type || ' Not Removed';
-        END IF;
+        DECLARE
+            action_info TEXT;
+        BEGIN
+            IF report_content_type = 'account' THEN
+                action_info := 'No Action';
+            ELSE
+                IF NEW.moderator_note = 'RF' THEN
+                    action_info := 'Not Removed';
+                ELSIF NEW.moderator_note = 'RNB' THEN
+                    action_info := 'Already Banned';
+                ELSIF NEW.moderator_note = 'RNF' THEN
+                    action_info := 'Already Flagged for future ban';
+                ELSIF NEW.moderator_note = 'RND' THEN
+                    action_info := 'Not Found';
+                END IF;
+            END IF;
+            
+            info := report_content_type || action_info;
+        END;
         event := 'Closed';
         
     END IF;
@@ -432,7 +461,7 @@ EXECUTE FUNCTION insert_report_event_timeline('REV');
 CREATE TRIGGER user_content_report_resolve_event_trigger
 AFTER UPDATE on "user_content_report_detail"
 FOR EACH ROW
-WHEN (OLD.reported_item_type IN ('post', 'comment', 'message') AND (OLD.status = 'URV' AND NEW.status IN ('RSD', 'RSR')))
+WHEN (OLD.status IN ('URV', 'FRS', 'FRR') AND NEW.status IN ('RSD', 'RSR'))
 EXECUTE FUNCTION insert_report_event_timeline('RES');
 
 CREATE TRIGGER user_content_report_close_event_trigger
@@ -440,57 +469,6 @@ AFTER UPDATE on "user_content_report_detail"
 FOR EACH ROW
 WHEN (OLD.status = 'URV' AND NEW.status = 'CSD')
 EXECUTE FUNCTION insert_report_event_timeline('CLS');
-
-
-
-/*function and trigger for handling resolved status for content_type account*/
-CREATE OR REPLACE FUNCTION insert_report_event_timeline_account_resolve()
-RETURNS TRIGGER AS $$
-DECLARE
-    report_id UUID;
-    event TEXT;
-    info TEXT;
-    status TEXT;
-    
-BEGIN
-    IF TG_OP = 'INSERT' THEN
-        status := NEW.status;
-        report_id := NEW.report_id;
-    ELSE
-        status := OLD.status;
-        report_id := OLD.report_id;
-    END IF;
-    
-    event := 'Resolved';
-    
-    IF status IN ('RSF', 'RSP') THEN
-        info := 'account restricted';
-    ELSIF status = 'TBN' THEN
-        info := 'account temp banned';
-    ELSIF status = 'PBN' THEN
-        info := 'account perm banned';
-    END IF;
-    
-    INSERT INTO "user_content_report_event_timeline" (event_type, detail, report_id) 
-    VALUES (event, info, report_id);
-    
-    RETURN NEW;
-
-END;
-$$ LANGUAGE plpgsql;
-
-
-CREATE TRIGGER user_content_report_account_resolve_event_update_trigger
-AFTER UPDATE on "user_restrict_ban_detail"
-FOR EACH ROW
-WHEN (OLD.content_type = 'account' AND (OLD.is_active = FALSE AND NEW.is_active = TRUE))
-EXECUTE FUNCTION insert_report_event_timeline_account_resolve();
-
-CREATE TRIGGER user_content_report_account_resolve_event_insert_trigger
-AFTER INSERT on "user_restrict_ban_detail"
-FOR EACH ROW
-WHEN (NEW.content_type = 'account' AND NEW.is_active = TRUE)
-EXECUTE FUNCTION insert_report_event_timeline_account_resolve();
 
 
 

@@ -100,7 +100,7 @@ def get_action_duration_final_violation_score(violation_score: int):
         case score if 500 <= score < 600:
             return ("RSF", 168)
         case score if 600 <= score < 650:
-            return ("TBN", 74)
+            return ("TBN", 72)
         case score if 650 <= score < 750:
             return ("TBN", 168)
         case score if 750 <= score < 850:
@@ -134,6 +134,21 @@ def create_violation_moderator_notes(
                         We've found that this {content_type} doesn't go against our Community Guidelines on {report_reason}.\n\
                         We understand that this might be upsetting.\n If you want to see less of {username} on VPKonnect, you can unfollow them.",
         },
+        "RNB": {
+            "message": f"We have reviewed {username}'s {content_type}, but it appears that the {content_type} has already been reviewed and banned.",
+            "detail": f"Case number: {case_number}\n The {content_type} in review has been found to violate our Community Guidelines as a result of a previous report review\n\
+                            Your vigilance is appreciated, and while your report may not have directly led to this action, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.",
+        },
+        "RNF": {
+            "message": f"We have reviewed {username}'s {content_type}, but it appears that the {content_type} has already been reviewed and flagged to be banned in future.",
+            "detail": f"Case number: {case_number}\n The {content_type} in review has been found to violate our Community Guidelines as a result of a previous report review\n\
+                            Your vigilance is appreciated, and while your report may not have directly led to this action, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.",
+        },
+        "RND": {
+            "message": f"We have reviewed {username}'s {content_type}, but it appears that the {content_type} could not be found.",
+            "detail": f"Case number: {case_number}\n Upon investigation, it appears that the {content_type} in review has either been deleted or is no longer accessible.\n\
+                        Your vigilance is appreciated, and while we were unable to directly assess the reported content, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.",
+        },
     }
 
     return violation_moderator_notes_dict.get(moderator_note)
@@ -146,8 +161,8 @@ action_entry_score_dict = {
     ("RSF", 24): 350,
     ("RSF", 72): 400,
     ("RSF", 168): 500,
-    ("TBN", 24): 600,
-    ("TBN", 72): 650,
-    ("TBN", 168): 750,
+    ("TBN", 72): 600,
+    ("TBN", 168): 650,
+    ("TBN", 504): 750,
     ("PBN", 99999): 850,
 }

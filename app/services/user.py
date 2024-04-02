@@ -177,7 +177,7 @@ def check_deactivation_expiration_for_scheduled_delete(db_session: Session):
             user_model.UserAccountHistory.account_detail_type == "Account",
             user_model.UserAccountHistory.event_type == "DSC",
             func.now()
-            > user_model.UserAccountHistory.created_at + timedelta(minutes=5),
+            >= (user_model.UserAccountHistory.created_at + timedelta(days=30)),
         )
         .all()
     )

@@ -16,7 +16,9 @@ class UserStatusEnum(str, Enum):
     DEACTIVATED_HIDE = "DAH"
     DEACTIVATED_KEEP = "DAK"
     PENDING_DELETE_HIDE = "PDH"
-    PENDING_DELETE_KEEP = "PDK"
+    PENDING_DELETE_KEEP = "PDK"  # to be removed
+    PENDING_DELETE_BAN = "PDB"
+    PENDING_DELETE_INACTIVE = "PDI"
     TEMPORARY_BAN = "TBN"
     PERMANENT_BAN = "PBN"
     DELETED = "DEL"
@@ -52,6 +54,8 @@ class PostStatusEnum(str, Enum):
     HIDDEN = "HID"
     BANNED = "BAN"
     DELETED = "DEL"
+    FLAGGED_TO_BE_BANNED = "FLB"
+    FLAGGED_DELETED = "FLD"
 
 
 class PostLikeStatusEnum(str, Enum):
@@ -73,6 +77,8 @@ class CommentStatusEnum(str, Enum):
     HIDDEN = "HID"
     BANNED = "BAN"
     DELETED = "DEL"
+    FLAGGED_TO_BE_BANNED = "FLB"
+    FLAGGED_DELETED = "FLD"
 
 
 class CommentLikeStatusEnum(str, Enum):
@@ -126,6 +132,8 @@ class UserContentReportDetailStatusEnum(str, Enum):
 
     OPEN = "OPN"
     UNDER_REVIEW = "URV"
+    FUTURE_RESOLVED = "FRS"
+    FUTURE_RESOLVED_RELATED = "FRR"
     CLOSED = "CSD"
     RESOLVED = "RSD"
     RESOLVED_RELATED = "RSR"

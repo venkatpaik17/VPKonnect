@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    ARRAY,
     TIMESTAMP,
     BigInteger,
     Boolean,
@@ -304,5 +305,32 @@ class GuidelineViolationLastAddedScore(Base):
         nullable=True,
         onupdate=func.now(),
     )
+    is_added = Column(Boolean(), nullable=False, server_default=text("True"))
 
     score = relationship("GuidelineViolationScore", back_populates="last_added_scores")
+
+
+class AccountReportFlaggedContent(Base):
+    __tablename__ = "account_report_flagged_content"
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.generate_ulid(),
+    )
+    flagged_content = Column(
+        ARRAY(UUID(as_uuid=True), dimensions=1), nullable=False, default=[]
+    )
+    valid_flagged_content = Column(
+        ARRAY(UUID(as_uuid=True), dimensions=1), nullable=False, default=[]
+    )
+    report_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("user_content_report_detail.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    is_deleted = Column(Boolean(), nullable=False, server_default=text("False"))
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
