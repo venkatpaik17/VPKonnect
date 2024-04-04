@@ -73,14 +73,27 @@ def user_login(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Credentials"
         )
 
+    if user.status == "PDI":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=f"Your account has been permanently deleted due to inactivity for {user.inactive_delete_after} or more. This decision cannot be reversed because the action was taken based on inactivity duration set in your account settings",
+        )
+
+    if user.status == "PDB":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Your account has been permanently deleted because it did not follow our community guidelines. This decision cannot be reversed either because we have already reviewed it, or because 30 days have passed since your account was permanently banned.",
+        )
+
     # check and get user restrict/ban entry if any
     restrict_ban_entry = admin_service.get_user_active_restrict_ban_entry(
-        user_id=user.id, status_in_list=["RSP", "RSF", "TBN", "PBN"], db_session=db
+        user_id=str(user.id), status_in_list=["RSP", "RSF", "TBN", "PBN"], db_session=db
     )
 
     try:
         # if account is deactivated then it should be activated by updating status to active
-        # but if there is any active retrict or ban i.e. RSP, RSF, TBN and PBN then update the status directly to restrict/ban status
+        # but if there is any active retrict or ban i.e. RSP, RSF, TBN then update the status directly to restrict/ban status
+        # PBN is not considered because, even if account is deactivated or inactive, status will be changed to PBN during actiom enforcement, for rest it won't
         if user.status in [
             "DAH",
             "DAK",
@@ -93,7 +106,6 @@ def user_login(
                 "RSP",
                 "RSF",
                 "TBN",
-                "PBN",
             ]:
                 # user_query.update(
                 #     {"status": restrict_ban_entry.status}, synchronize_session=False

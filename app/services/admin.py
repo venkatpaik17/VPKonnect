@@ -199,6 +199,17 @@ def get_user_active_restrict_ban_entry(
     )
 
 
+# get users active/restrict ban entry
+def get_users_active_restrict_ban_entry_query(
+    user_id_list: list[UUID], db_session: Session
+):
+    return db_session.query(admin_model.UserRestrictBanDetail).filter(
+        admin_model.UserRestrictBanDetail.user_id.in_(user_id_list),
+        admin_model.UserRestrictBanDetail.is_active == True,
+        admin_model.UserRestrictBanDetail.is_deleted == False,
+    )
+
+
 # get user active restrict/ban entry using userid, reportid
 def get_user_active_restrict_ban_entry_user_id_report_id(
     user_id: str, status: str, report_id: str, db_session: Session
@@ -241,4 +252,14 @@ def get_valid_flagged_content_account_report(report_id: str, db_session: Session
             admin_model.AccountReportFlaggedContent.is_deleted == False,
         )
         .first()
+    )
+
+
+def check_permanent_ban_appeal_limit_expiry_query(db_session: Session):
+    return db_session.query(admin_model.UserRestrictBanDetail).filter(
+        admin_model.UserRestrictBanDetail.status == "PBN",
+        func.now()
+        >= (admin_model.UserRestrictBanDetail.enforce_action_at + timedelta(days=30)),
+        admin_model.UserRestrictBanDetail.is_active == True,
+        admin_model.UserRestrictBanDetail.is_deleted == False,
     )

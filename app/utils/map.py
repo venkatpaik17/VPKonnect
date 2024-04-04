@@ -64,7 +64,7 @@ report_reasons_severity_group_dict = {
     "PRTND-ME": "CMD",
     "PRTND-SIF": "CMD",
     "PRTND-CBPF": "CMD",
-    "PRTND-BUSS": "CMD",
+    "PRTND-BUSS": "CMD",  # CMD means Content Moderator Decision
 }
 
 severity_groups_scores_dict = {

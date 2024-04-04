@@ -80,7 +80,7 @@ class User(Base):
         nullable=False,
         server_default=func.gen_random_uuid(),
     )
-    inactive_delete_after = Column(Integer, nullable=False, server_default=text("6"))
+    inactive_delete_after = Column(Integer, nullable=False, server_default=text("183"))
 
     followers = relationship(
         "UserFollowAssociation",

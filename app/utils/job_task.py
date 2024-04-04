@@ -427,10 +427,28 @@ def user_inactivity_delete():
     inactive_auth_entries = auth_service.user_auth_track_user_inactivity_delete(
         db_session=db
     )
+
+    # get user ids
+    inactive_user_ids = [user.id for user in inactive_auth_entries]
+
+    # check if the users have active restrict/ban, if yes then get the query
+    users_active_restrict_ban_query = (
+        admin_service.get_users_active_restrict_ban_entry_query(
+            user_id_list=inactive_user_ids, db_session=db
+        )
+    )
+
     if inactive_auth_entries:
         try:
+            # change user status to PDI
             for user in inactive_auth_entries:
                 user.status = "PDI"
+
+            # revoke the restrict/ban if there's one, by changing is_active to False, since the user is to be deleted permanently, restrict/ban is meaningless after this
+            users_active_restrict_ban_query.update(
+                {"is_active": False},
+                synchronize_session=False,
+            )
 
             db.commit()
         except SQLAlchemyError as exc:
@@ -467,6 +485,45 @@ def user_inactivity_inactive():
                 print("SQL Error:", exc)
 
     print("Inactive Users. Done")
+
+
+# PBN 30 day appeal limit check
+def delete_user_after_permanent_ban_appeal_limit_expiry():
+    db: Session = next(get_db())
+
+    # get all PBN users whose limit is expired
+    pbn_expired_limit_users_query = (
+        admin_service.check_permanent_ban_appeal_limit_expiry_query(db_session=db)
+    )
+    pbn_expired_limit_users = pbn_expired_limit_users_query.all()
+    if pbn_expired_limit_users:
+        # get the user ids
+        pbn_expired_limit_users_ids = [
+            str(user.user_id) for user in pbn_expired_limit_users
+        ]
+
+        # get users
+        users_for_scheduled_delete = user_service.get_all_users_by_id(
+            user_id_list=pbn_expired_limit_users_ids,
+            status_in_list=["PBN"],
+            db_session=db,
+        )
+        if users_for_scheduled_delete:
+            try:
+                # change user status to PDB
+                for user in users_for_scheduled_delete:
+                    user.status = "PDB"
+
+                # revoke the PBN by chnaging is_active to False, since the user is to be deleted permanently, ban is meaningless after this
+                pbn_expired_limit_users_query.update(
+                    {"is_active": False},
+                    synchronize_session=False,
+                )
+
+                db.commit()
+            except SQLAlchemyError as exc:
+                db.rollback()
+                print("SQL Error:", exc)
 
 
 # def reduce_violation_score_quarterly(db_session = next(get_db())):

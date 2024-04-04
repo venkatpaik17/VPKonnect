@@ -206,3 +206,18 @@ def check_if_same_report_exists(
         )
         .first()
     )
+
+
+# get user account history entry for a user
+def get_user_account_history_entry(
+    user_id: UUID, account_detail_type: str, event_type: str, db_session: Session
+):
+    return (
+        db_session.query(user_model.UserAccountHistory)
+        .filter(
+            user_model.UserAccountHistory.user_id == user_id,
+            user_model.UserAccountHistory.account_detail_type == account_detail_type,
+            user_model.UserAccountHistory.event_type == event_type,
+        )
+        .first()
+    )

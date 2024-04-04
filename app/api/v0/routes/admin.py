@@ -259,15 +259,16 @@ def selected_reports_under_review_update(
             valid_reports.append(case_no)
 
     db.commit()
+
     if invalid_reports:
         return {
             "message": f"{len(valid_reports)} report(s) is/are marked for review",
             "error": f"{len(invalid_reports)} report(s), case number(s): {invalid_reports} could not be marked for review due to internal error. These reports might already be reviewed or are closed/resolved by concerned moderators",
         }
-    else:
-        return {
-            "message": f"{len(valid_reports)} report(s) {valid_reports} is/are marked for review"
-        }
+
+    return {
+        "message": f"{len(valid_reports)} report(s) {valid_reports} is/are marked for review"
+    }
 
 
 # violation enforcement action algorithm, we use this only for post, comment and message reports
@@ -375,6 +376,34 @@ def enforce_report_action_auto(
         #     status_code=status.HTTP_404_NOT_FOUND,
         #     detail="User profile not found",
         # )
+
+    # if there are any OPN related report(s) which were not noticed before, put it/them under review and consider it/them in this action request
+    # get open related reports
+    open_related_reports_to_be_reviewed = (
+        admin_service.get_open_reports_for_specific_content_report(
+            case_number=action_request.case_number,
+            reported_item_id=report.reported_item_id,
+            reported_item_type=report.reported_item_type,
+            db_session=db,
+        )
+    )
+    # get case numbers of the related reports if any
+    open_related_reports_put_under_review_message = None
+    if open_related_reports_to_be_reviewed:
+        open_related_reports_case_numbers = [
+            related_report.case_number
+            for related_report in open_related_reports_to_be_reviewed
+        ]
+        if open_related_reports_case_numbers:
+            selected_reports_under_review_update(
+                reports_request=admin_schema.ReportUnderReviewUpdate(
+                    case_number_list=open_related_reports_case_numbers
+                ),
+                db=db,
+                current_employee=current_employee,
+            )
+
+            open_related_reports_put_under_review_message = f"Additional {len(open_related_reports_case_numbers)} related report(s), case number(s): {open_related_reports_case_numbers} was/were put under review and was/were included in this action request"
 
     # map report reason to severity group
     severity_group = map_utils.report_reasons_severity_group_dict.get(
@@ -662,6 +691,13 @@ def enforce_report_action_auto(
         report_reason=report.report_reason,
     )
 
+    if open_related_reports_put_under_review_message:
+        return {
+            "message": message,
+            "detail": moderator_note_full,
+            "additional_message": open_related_reports_put_under_review_message,
+        }
+
     return {"message": message, "detail": moderator_note_full}
 
 
@@ -764,6 +800,34 @@ def enforce_report_action_manual(
         #     status_code=status.HTTP_404_NOT_FOUND,
         #     detail="User profile not found",
         # )
+
+    # if there are any OPN related report(s) which were not noticed before, put it/them under review and consider it/them in this action request
+    # get open related reports
+    open_related_reports_to_be_reviewed = (
+        admin_service.get_open_reports_for_specific_content_report(
+            case_number=action_request.case_number,
+            reported_item_id=report.reported_item_id,
+            reported_item_type=report.reported_item_type,
+            db_session=db,
+        )
+    )
+    # get case numbers of the related reports if any
+    open_related_reports_put_under_review_message = None
+    if open_related_reports_to_be_reviewed:
+        open_related_reports_case_numbers = [
+            related_report.case_number
+            for related_report in open_related_reports_to_be_reviewed
+        ]
+        if open_related_reports_case_numbers:
+            selected_reports_under_review_update(
+                reports_request=admin_schema.ReportUnderReviewUpdate(
+                    case_number_list=open_related_reports_case_numbers
+                ),
+                db=db,
+                current_employee=current_employee,
+            )
+
+            open_related_reports_put_under_review_message = f"Additional {len(open_related_reports_case_numbers)} related report(s), case number(s): {open_related_reports_case_numbers} was/were put under review and was/were included in this action request"
 
     # map action, duration with minimum required violation score
     action_duration = (
@@ -1048,8 +1112,16 @@ def enforce_report_action_manual(
         report_reason=report.report_reason,
     )
 
+    message = f"Request processed successfully. Requested action taken. Report case number {action_request.case_number} resolved."
+    if open_related_reports_put_under_review_message:
+        return {
+            "message": message,
+            "detail": moderator_note_full,
+            "additional_message": open_related_reports_put_under_review_message,
+        }
+
     return {
-        "message": f"Request processed successfully. Requested action taken. Report case number {action_request.case_number} resolved.",
+        "message": message,
         "detail": moderator_note_full,
     }
 
