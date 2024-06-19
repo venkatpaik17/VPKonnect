@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import MetaData, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config.app import settings
@@ -14,3 +14,6 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # this returns a base class which we will inherit to create each database models/ORM models
 Base = declarative_base()
+
+# create a MetaData object bound to the engine
+metadata = MetaData(engine)

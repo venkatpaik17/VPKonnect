@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from app.schemas import comment as comment_schema
 from app.schemas import employee as employee_schema
@@ -27,11 +27,21 @@ class ReportResponse(ReportRequest):
     reported_item: (
         post_schema.PostOutput | comment_schema.CommentOutput | user_schema.UserOutput
     )
+    flagged_banned_posts: list[UUID] = Field(
+        default_factory=list,
+        description="This attribute will only display if it's not an empty list.",
+    )
     case_number: int
     report_reason: str
-    report_reason_user: user_schema.UserOutput | None
-    moderator_note: str | None
-    moderator: employee_schema.EmployeeOutput | None
+    report_reason_user: user_schema.UserOutput = Field(
+        None, description="This attribute will only display if it's not None"
+    )
+    moderator_note: str = Field(
+        None, description="This attribute will only display if it's not None"
+    )
+    moderator: employee_schema.EmployeeOutput = Field(
+        None, description="This attribute will only display if it's not None"
+    )
     reported_at: datetime
 
     @classmethod

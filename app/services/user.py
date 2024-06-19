@@ -59,7 +59,7 @@ def get_user_by_id(user_id: str, status_not_in_list: list[str], db_session: Sess
 
 # get all users by id
 def get_all_users_by_id(
-    user_id_list: list[str], status_in_list: list[str], db_session: Session
+    user_id_list: list[UUID], status_in_list: list[str], db_session: Session
 ):
     return (
         db_session.query(user_model.User)

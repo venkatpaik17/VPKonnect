@@ -168,7 +168,7 @@ class UserAccountHistory(Base):
     event_type = Column(String(), nullable=False)
     new_detail_value = Column(String(), nullable=True)
     previous_detail_value = Column(String(), nullable=True)
-    device_info = Column(String(), nullable=False)
+    # device_info = Column(String(), nullable=False)
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )

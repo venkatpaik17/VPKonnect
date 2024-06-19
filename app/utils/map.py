@@ -86,7 +86,7 @@ content_weigths_dict = {
 def get_action_duration_final_violation_score(violation_score: int):
     match violation_score:
         case score if 0 <= score < 150:
-            return ("NA", None)
+            return ("NA", 0)
         case score if 150 <= score < 250:
             return ("RSP", 24)
         case score if 250 <= score < 300:
@@ -106,9 +106,9 @@ def get_action_duration_final_violation_score(violation_score: int):
         case score if 750 <= score < 850:
             return ("TBN", 504)
         case score if score >= 850:
-            return ("PBN", inf)
+            return ("PBN", 99999)
         case _:
-            return (None, None)
+            return ("UND", -1)
 
 
 def create_violation_moderator_notes(
@@ -121,40 +121,49 @@ def create_violation_moderator_notes(
     violation_moderator_notes_dict = {
         "RS": {
             "message": f"We have reviewed {username}'s {content_type} and found that it goes against our Community Guidelines",
-            "detail": f"Case number: {case_number}\n To keep our review process as fair as possible,\
-                        we use the same set of Community Guidelines to review all reports.\n\
-                        We've found that this {content_type} does go against our Community Guidelines on {report_reason}.\n\
-                        We've let {username} know that their {content_type} has been removed, but not who reported it.\n\
-                        Report like yours are an important part of making VPKonnect a safe and welcoming place for everyone.",
+            "detail": f"""Case number: {case_number} 
+            To keep our review process as fair as possible, we use the same set of Community Guidelines to review all reports.
+            We've found that this {content_type} does go against our Community Guidelines on {report_reason}.
+            We've let {username} know that their {content_type} has been removed, but not who reported it. 
+            Report like yours are an important part of making VPKonnect a safe and welcoming place for everyone.""",
         },
         "RF": {
             "message": f"We have reviewed {username}'s {content_type} and found that it doesn't go against our Community Guidelines",
-            "detail": f"Case number: {case_number}\n To keep our review process as fair as possible,\
-                        we use the same set of Community Guidelines to review all reports.\n\
-                        We've found that this {content_type} doesn't go against our Community Guidelines on {report_reason}.\n\
-                        We understand that this might be upsetting.\n If you want to see less of {username} on VPKonnect, you can unfollow them.",
+            "detail": f"""Case number: {case_number}
+            To keep our review process as fair as possible, we use the same set of Community Guidelines to review all reports.
+            We've found that this {content_type} doesn't go against our Community Guidelines on {report_reason}.
+            We understand that this might be upsetting. If you want to see less of {username} on VPKonnect, you can unfollow them.""",
         },
         "RNB": {
             "message": f"We have reviewed {username}'s {content_type}, but it appears that the {content_type} has already been reviewed and banned.",
-            "detail": f"Case number: {case_number}\n The {content_type} in review has been found to violate our Community Guidelines as a result of a previous report review\n\
-                            Your vigilance is appreciated, and while your report may not have directly led to this action, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.",
+            "detail": f"""Case number: {case_number}
+            The {content_type} in review has been found to violate our Community Guidelines as a result of a previous report review.
+            Your vigilance is appreciated, and while your report may not have directly led to this action, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.""",
         },
         "RNF": {
             "message": f"We have reviewed {username}'s {content_type}, but it appears that the {content_type} has already been reviewed and flagged to be banned in future.",
-            "detail": f"Case number: {case_number}\n The {content_type} in review has been found to violate our Community Guidelines as a result of a previous report review\n\
-                            Your vigilance is appreciated, and while your report may not have directly led to this action, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.",
+            "detail": f"""Case number: {case_number}
+            The {content_type} in review has been found to violate our Community Guidelines as a result of a previous report review.
+            Your vigilance is appreciated, and while your report may not have directly led to this action, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.""",
         },
         "RND": {
             "message": f"We have reviewed {username}'s {content_type}, but it appears that the {content_type} could not be found.",
-            "detail": f"Case number: {case_number}\n Upon investigation, it appears that the {content_type} in review has either been deleted or is no longer accessible.\n\
-                        Your vigilance is appreciated, and while we were unable to directly assess the reported content, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.",
+            "detail": f"""Case number: {case_number}
+            Upon investigation, it appears that the {content_type} in review has either been deleted or is no longer accessible.
+            Your vigilance is appreciated, and while we were unable to directly assess the reported content, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.""",
+        },
+        "RNU": {
+            "message": f"We could not review {username}'s {content_type} because the {username}'s account could not be found.",
+            "detail": f"""Case number: {case_number}
+            Upon investigation, it appears that the {username}'s account is either deleted or is no longer accessible.
+            Your vigilance is appreciated, and while we were unable to review this report, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.""",
         },
     }
 
     return violation_moderator_notes_dict.get(moderator_note)
 
 
-action_entry_score_dict = {
+action_entry_score_dict: dict[tuple[str, int], int] = {
     ("RSP", 24): 150,
     ("RSP", 72): 250,
     ("RSP", 168): 300,

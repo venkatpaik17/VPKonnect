@@ -1,14 +1,23 @@
-from sqlalchemy import func
+from datetime import timedelta
+
+import requests
+from fastapi import BackgroundTasks
+from pydantic import EmailStr
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models import admin as admin_model
+from app.models import comment as comment_model
+from app.models import post as post_model
+from app.schemas import admin as admin_schema
 from app.services import admin as admin_service
 from app.services import auth as auth_service
 from app.services import comment as comment_service
 from app.services import post as post_service
 from app.services import user as user_service
+from app.utils import email as email_utils
 
 
 def delete_user_after_deactivation_period_expiration():
@@ -20,9 +29,7 @@ def delete_user_after_deactivation_period_expiration():
     # print(scheduled_delete_entries[0].__dict__ if scheduled_delete_entries else None)
     if scheduled_delete_entries:
         # fetch user ids
-        scheduled_delete_user_ids = [
-            str(user.user_id) for user in scheduled_delete_entries
-        ]
+        scheduled_delete_user_ids = [user.user_id for user in scheduled_delete_entries]
         # print(scheduled_delete_user_ids)
         # get the users
         users_to_be_deleted = user_service.get_all_users_by_id(
@@ -144,19 +151,22 @@ def consecutive_violation_operations(
     # if report content type is account, then fetch the valid_flagged_content list from account_report_flagged_content table
     # iterate through the list and change the status from FLB to BAN, if the status of the content is FLD then dont change the status, let it be
     if consecutive_violation_report.reported_item_type == "account":
-        valid_flagged_content = admin_service.get_valid_flagged_content_account_report(
-            report_id=str(consecutive_violation_report.id), db_session=db
+        valid_flagged_content = (
+            admin_service.get_all_valid_flagged_content_account_report_id(
+                report_id=consecutive_violation_report.id, db_session=db
+            )
         )
         if not valid_flagged_content:
             raise Exception(
                 "Error. Valid Flagged Content(s) associated with consecutive violation report not found"
             )
 
-        # we flag only posts for report type account, so content is basically post, valid_flagged_content is a list of post ids
-        for content in valid_flagged_content[0]:
-            print(content)
+        valid_flagged_content_ids = [content[0] for content in valid_flagged_content]
+        # we flag only posts for report type account, so content is basically post, valid_flagged_content_ids is a list of post ids
+        for content_id in valid_flagged_content_ids:
+            print(content_id)
             post = post_service.get_a_post(
-                post_id=str(content),
+                post_id=str(content_id),
                 status_not_in_list=["PUB", "DRF", "HID", "DEL"],
                 db_session=db,
             )
@@ -215,7 +225,9 @@ def consecutive_violation_operations(
                 comment.status = "BAN"
 
 
-def remove_restriction_on_user_after_duration_expiration():
+def remove_restriction_on_user_after_duration_expiration(
+    background_tasks: BackgroundTasks,
+):
     db: Session = next(get_db())
     remove_restrict_users_query = (
         admin_service.get_restricted_users_duration_expired_query(db_session=db)
@@ -230,10 +242,30 @@ def remove_restriction_on_user_after_duration_expiration():
                 synchronize_session=False,
             )
 
-            # get the user ids
-            remove_restrict_user_ids_report_ids = [
-                (item.user_id, item.report_id) for item in remove_restrict_users
+            # get report ids
+            remove_restrict_report_ids = [
+                item.report_id for item in remove_restrict_users
             ]
+
+            # close pending appeals
+            restrict_users_pending_appeals = (
+                admin_service.get_all_appeals_report_id_list(
+                    report_id_list=remove_restrict_report_ids,
+                    status_in_list=["OPN", "URV"],
+                    db_session=db,
+                )
+            )
+            if restrict_users_pending_appeals:
+                for appeal in restrict_users_pending_appeals:
+                    appeal.status = "CSD"
+                    appeal.moderator_note = "AE"  # appeal expired
+
+            # get the user ids
+            remove_restrict_user_ids = [item.user_id for item in remove_restrict_users]
+
+            remove_restrict_user_ids_report_ids = list(
+                zip(remove_restrict_user_ids, remove_restrict_report_ids)
+            )
 
             # for every user id, check if there is any consecutive violation.
             # Since we have already updated is_active to False of the current active restrict/ban, we need to exclude that entry while getting next violation, so we use report_id in filter
@@ -284,6 +316,8 @@ def remove_restriction_on_user_after_duration_expiration():
                 )
 
                 consecutive_violation = consecutive_violation_query.first()
+
+                user_inactive_deactivated = ["DAH", "DAK", "PDH", "PDK", "INA"]
                 if consecutive_violation:
                     # enforce next violation
                     consecutive_violation_query.update(
@@ -292,20 +326,58 @@ def remove_restriction_on_user_after_duration_expiration():
 
                     # get user
                     user = user_service.get_user_by_id(
-                        str(consecutive_violation.user_id), ["ACT", "PBN", "DEL"], db
+                        str(consecutive_violation.user_id),
+                        ["ACT", "TBN", "PBN", "DEL"],
+                        db,
                     )
-                    if user and user.status not in ["DAH", "DAK", "PDH", "PDK", "INA"]:
-                        user.status = consecutive_violation.status  # status update
+                    if user:
+                        consecutive_violation_operations(
+                            consecutive_violation=consecutive_violation, db=db
+                        )
 
-                    consecutive_violation_operations(
-                        consecutive_violation=consecutive_violation, db=db
-                    )
+                        # send email if status is TBN/PBN
+                        if consecutive_violation.status == "PBN" or (
+                            consecutive_violation.status == "TBN"
+                            and user.status not in user_inactive_deactivated
+                        ):
+                            # generate appeal link
+                            appeal_link = (
+                                "https://vpkonnect.in/accounts/appeals/form_ban"
+                            )
 
+                            email_subject = "VPKonnect - Account Ban"
+                            email_details = admin_schema.SendEmail(
+                                template=(
+                                    "permanent_ban_email.html"
+                                    if consecutive_violation.status == "PBN"
+                                    else "temporary_ban_email.html"
+                                ),
+                                email=[EmailStr(user.email)],
+                                body_info={
+                                    "username": user.username,
+                                    "link": appeal_link,
+                                    "days": consecutive_violation.duration // 24,
+                                    "ban_enforced_datetime": consecutive_violation.enforce_action_at.strftime(
+                                        "%b %d, %Y %H:%M %Z"
+                                    ),
+                                },
+                            )
+
+                            email_utils.send_email(
+                                email_subject, email_details, background_tasks
+                            )
+
+                        # update user status
+                        if user.status not in user_inactive_deactivated or (
+                            user.status in user_inactive_deactivated
+                            and consecutive_violation.status == "PBN"
+                        ):
+                            user.status = consecutive_violation.status
                 else:
                     user = user_service.get_user_by_id(
                         restrict_user_id, ["ACT", "TBN", "PBN", "DEL"], db
                     )
-                    if user and user.status not in ["DAH", "DAK", "PDH", "PDK", "INA"]:
+                    if user and user.status not in user_inactive_deactivated:
                         user.status = "ACT"
 
             db.commit()
@@ -335,10 +407,26 @@ def remove_ban_on_user_after_duration_expiration():
                 synchronize_session=False,
             )
 
+            # get report ids
+            remove_banned_report_ids = [item.report_id for item in remove_banned_users]
+
+            # close pending appeals
+            banned_users_pending_appeals = admin_service.get_all_appeals_report_id_list(
+                report_id_list=remove_banned_report_ids,
+                status_in_list=["OPN", "URV"],
+                db_session=db,
+            )
+            if banned_users_pending_appeals:
+                for appeal in banned_users_pending_appeals:
+                    appeal.status = "CSD"
+                    appeal.moderator_note = "AE"  # appeal expired
+
             # get user ids
-            remove_banned_user_ids_report_ids = [
-                (item.user_id, item.report_id) for item in remove_banned_users
-            ]
+            remove_banned_user_ids = [item.user_id for item in remove_banned_users]
+
+            remove_banned_user_ids_report_ids = list(
+                zip(remove_banned_user_ids, remove_banned_report_ids)
+            )
 
             # for every user id, check if there is any consecutive violation.
             # Since we have already updated is_active to False of the current active restrict/ban, we need to exclude that entry while getting next violation, so we use report_id in filter
@@ -385,6 +473,7 @@ def remove_ban_on_user_after_duration_expiration():
                 )
                 consecutive_violation = consecutive_violation_query.first()
 
+                user_inactive_deactivated = ["DAH", "DAK", "PDH", "PDK", "INA"]
                 if consecutive_violation:
                     # enforce next violation
                     consecutive_violation_query.update(
@@ -395,22 +484,70 @@ def remove_ban_on_user_after_duration_expiration():
                     # get user
                     user = user_service.get_user_by_id(
                         user_id=consecutive_violation.user_id,
-                        status_not_in_list=["ACT", "PBN", "DEL"],
+                        status_not_in_list=["ACT", "RSP", "RSF", "PBN", "DEL"],
                         db_session=db,
                     )
-                    if user and user.status not in ["DAH", "DAK", "PDH", "PDK", "INA"]:
-                        user.status = consecutive_violation.status  # status update
+                    if user:
+                        consecutive_violation_operations(
+                            consecutive_violation=consecutive_violation, db=db
+                        )
 
-                    consecutive_violation_operations(
-                        consecutive_violation=consecutive_violation, db=db
-                    )
+                        # send email if status is TBN/PBN
+                        if consecutive_violation.status == "PBN" or (
+                            consecutive_violation.status == "TBN"
+                            and user.status not in user_inactive_deactivated
+                        ):
+                            print("Hello")
+                            # generate appeal link
+                            appeal_link = (
+                                "https://vpkonnect.in/accounts/appeals/form_ban"
+                            )
+
+                            email_subject = "VPKonnect - Account Ban"
+                            email_details = admin_schema.SendEmail(
+                                template=(
+                                    "permanent_ban_email.html"
+                                    if consecutive_violation.status == "PBN"
+                                    else "temporary_ban_email.html"
+                                ),
+                                email=[EmailStr(user.email)],
+                                body_info={
+                                    "username": user.username,
+                                    "link": appeal_link,
+                                    "days": consecutive_violation.duration // 24,
+                                    "ban_enforced_datetime": consecutive_violation.enforce_action_at.strftime(
+                                        "%b %d, %Y %H:%M %Z"
+                                    ),
+                                },
+                            )
+
+                            # email_utils.send_email(
+                            #     email_subject, email_details, background_tasks
+                            # )
+
+                            print("1")
+                            url = "http://127.0.0.1:8000/users/send_ban_mail"
+                            json_data = {
+                                "email_subject": email_subject,
+                                "email_details": email_details,
+                            }
+                            print("2")
+                            requests.post(url=url, json=json_data)
+                            print("3")
+
+                        # update user status
+                        if user.status not in user_inactive_deactivated or (
+                            user.status in user_inactive_deactivated
+                            and consecutive_violation.status == "PBN"
+                        ):
+                            user.status = consecutive_violation.status
                 else:
                     user = user_service.get_user_by_id(
                         user_id=banned_user_id,
                         status_not_in_list=["ACT", "RSP", "RSF", "PBN", "DEL"],
                         db_session=db,
                     )
-                    if user and user.status not in ["DAH", "DAK", "PDH", "PDK", "INA"]:
+                    if user and user.status not in user_inactive_deactivated:
                         user.status = "ACT"  # status update
 
             db.commit()
@@ -421,9 +558,9 @@ def remove_ban_on_user_after_duration_expiration():
     print("Ban Users. Job Done")
 
 
-def user_inactivity_delete():
+def user_inactivity_delete(background_tasks: BackgroundTasks):
     db: Session = next(get_db())
-    # get all user auth track entries whose last entry has passed 6 months, recent ones
+    # get all users whose user auth track entries last entry has passed 6/12 months, recent ones
     inactive_auth_entries = auth_service.user_auth_track_user_inactivity_delete(
         db_session=db
     )
@@ -434,7 +571,9 @@ def user_inactivity_delete():
     # check if the users have active restrict/ban, if yes then get the query
     users_active_restrict_ban_query = (
         admin_service.get_users_active_restrict_ban_entry_query(
-            user_id_list=inactive_user_ids, db_session=db
+            user_id_list=inactive_user_ids,
+            status_in_list=["RSP", "RSF", "TBN"],
+            db_session=db,
         )
     )
 
@@ -455,7 +594,25 @@ def user_inactivity_delete():
             db.rollback()
             print("SQL Error:", exc)
 
-    print("Inactive Delete Users. Done")
+        # get user emails
+        inactive_user_emails = [user.email for user in inactive_auth_entries]
+
+        # generate request data link
+        request_data_link = "https://vpkonnect.in/accounts/data_request_form"
+        email_subject = "VPKonnect - Account Deletion Due to User Inactivity"
+        email_details = admin_schema.SendEmail(
+            template="inactivity_delete_email.html",
+            email=inactive_user_emails,
+            body_info={
+                "link": request_data_link,
+            },
+        )
+        try:
+            email_utils.send_email(email_subject, email_details, background_tasks)
+        except Exception as exc:
+            print("Email error: ", exc)
+
+    print("Inactive Delete Users. Job Done")
 
 
 def user_inactivity_inactive():
@@ -484,48 +641,385 @@ def user_inactivity_inactive():
                 db.rollback()
                 print("SQL Error:", exc)
 
-    print("Inactive Users. Done")
+    print("Inactive Users. Job Done")
 
 
-# PBN 30 day appeal limit check
-def delete_user_after_permanent_ban_appeal_limit_expiry():
+# PBN 21 day appeal limit check
+def delete_user_after_permanent_ban_appeal_limit_expiry(
+    background_tasks: BackgroundTasks,
+):
     db: Session = next(get_db())
 
-    # get all PBN users whose limit is expired
-    pbn_expired_limit_users_query = (
-        admin_service.check_permanent_ban_appeal_limit_expiry_query(db_session=db)
+    # join user_restrict_ban_detail and user_content_restrict_ban_appeal_detail tables
+    # to get PBN users having no pending appeals expiring 21 day appeal limit
+    pbn_users_with_no_pending_appeal = (
+        db.query(admin_model.UserRestrictBanDetail)
+        .join(
+            admin_model.UserContentRestrictBanAppealDetail,
+            admin_model.UserRestrictBanDetail.report_id
+            == admin_model.UserContentRestrictBanAppealDetail.report_id,
+            isouter=True,
+        )
+        .filter(
+            admin_model.UserRestrictBanDetail.status == "PBN",
+            admin_model.UserRestrictBanDetail.is_active == True,
+            admin_model.UserRestrictBanDetail.is_deleted == False,
+            func.now()
+            >= (
+                admin_model.UserRestrictBanDetail.enforce_action_at
+                + timedelta(days=21),
+            ),
+            admin_model.UserContentRestrictBanAppealDetail.id == None,
+        )
+        .all()
     )
-    pbn_expired_limit_users = pbn_expired_limit_users_query.all()
-    if pbn_expired_limit_users:
-        # get the user ids
-        pbn_expired_limit_users_ids = [
-            str(user.user_id) for user in pbn_expired_limit_users
+
+    if pbn_users_with_no_pending_appeal:
+        # get user ids
+        pbn_no_appeal_user_ids = [
+            ban_entry.user_id for ban_entry in pbn_users_with_no_pending_appeal
         ]
 
+        # get ban entry ids
+        pbn_no_appeal_ban_entry_ids = [
+            ban_entry.id for ban_entry in pbn_users_with_no_pending_appeal
+        ]
+
+        # get ban entries
+        pbn_no_appeal_ban_entries = (
+            admin_service.get_users_active_restrict_ban_entry_id(
+                restrict_ban_id_list=pbn_no_appeal_ban_entry_ids, db_session=db
+            )
+        )
+
         # get users
-        users_for_scheduled_delete = user_service.get_all_users_by_id(
-            user_id_list=pbn_expired_limit_users_ids,
+        pbn_no_appeal_users = user_service.get_all_users_by_id(
+            user_id_list=pbn_no_appeal_user_ids, status_in_list=["PBN"], db_session=db
+        )
+
+        try:
+            # update is_active to False
+            for ban_entry in pbn_no_appeal_ban_entries:
+                ban_entry.is_active = False
+
+            # update user status to PDB
+            for user in pbn_no_appeal_users:
+                user.status = "PDB"
+
+            db.commit()
+        except SQLAlchemyError as exc:
+            db.rollback()
+            print("SQL Error:", exc)
+
+        # get user emails
+        pbn_no_appeal_user_emails = [user.email for user in pbn_no_appeal_users]
+
+        # generate request data link
+        request_data_link = "https://vpkonnect.in/accounts/data_request_form"
+        email_subject = "VPKonnect - Account Deletion Due to Appeal Limit Expiration"
+        email_details = admin_schema.SendEmail(
+            template="appeal_limit_account_delete.html",
+            email=pbn_no_appeal_user_emails,
+            body_info={
+                "link": request_data_link,
+            },
+        )
+        try:
+            email_utils.send_email(email_subject, email_details, background_tasks)
+        except Exception as exc:
+            print("Email error: ", exc)
+
+    print("PBN 21 day Appeal Limit. Job Done")
+
+
+# post/comment 21 day appeal limit check
+def delete_content_after_ban_appeal_limit_expiry():
+    db: Session = next(get_db())
+
+    # join post and appeal table to get the posts to be deleted
+    posts_with_no_pending_appeal = (
+        db.query(post_model.Post)
+        .join(
+            admin_model.UserContentRestrictBanAppealDetail,
+            post_model.Post.id
+            == admin_model.UserContentRestrictBanAppealDetail.content_id,
+            isouter=True,
+        )
+        .filter(
+            post_model.Post.status == "BAN",
+            post_model.Post.is_deleted == False,
+            func.now() >= (post_model.Post.updated_at + timedelta(days=21)),
+            or_(
+                admin_model.UserContentRestrictBanAppealDetail.id == None,
+                admin_model.UserContentRestrictBanAppealDetail.status == "ACP",
+            ),
+        )
+        .all()
+    )
+
+    # join comment and appeal table to get the comments to be deleted
+    comments_with_no_pending_appeal = (
+        db.query(comment_model.Comment)
+        .join(
+            admin_model.UserContentRestrictBanAppealDetail,
+            comment_model.Comment.id
+            == admin_model.UserContentRestrictBanAppealDetail.content_id,
+            isouter=True,
+        )
+        .filter(
+            comment_model.Comment.status == "BAN",
+            comment_model.Comment.is_deleted == False,
+            func.now() >= (comment_model.Comment.updated_at + timedelta(days=21)),
+            or_(
+                admin_model.UserContentRestrictBanAppealDetail.id == None,
+                admin_model.UserContentRestrictBanAppealDetail.status == "ACP",
+            ),
+        )
+        .all()
+    )
+
+    if posts_with_no_pending_appeal:
+        # get all post ids of the posts to be deleted
+        post_ids = [post_entry.id for post_entry in posts_with_no_pending_appeal]
+
+        try:
+            # get posts query
+            posts_to_be_deleted_query = post_service.get_all_posts_by_id_query(
+                post_id_list=post_ids, status_in_list=["BAN"], db_session=db
+            )
+
+            # update the is_deleted to True
+            posts_to_be_deleted_query.update(
+                {"is_deleted": True},
+                synchronize_session=False,
+            )
+
+            db.commit()
+        except SQLAlchemyError as exc:
+            db.rollback()
+            print("SQL Error:", exc)
+
+    if comments_with_no_pending_appeal:
+        # get all comment ids of the posts to be deleted
+        comment_ids = [
+            comment_entry.id for comment_entry in comments_with_no_pending_appeal
+        ]
+
+        try:
+            # get comments query
+            comments_to_be_deleted_query = comment_service.get_all_comments_by_id_query(
+                comment_id_list=comment_ids, status_in_list=["BAN"], db_session=db
+            )
+
+            # update the is_deleted to True
+            comments_to_be_deleted_query.update(
+                {"is_deleted": True},
+                synchronize_session=False,
+            )
+
+            db.commit()
+        except SQLAlchemyError as exc:
+            db.rollback()
+            print("SQL Error:", exc)
+
+    print("Post/Comment 21 day Appeal Limit. Job Done")
+
+
+def close_appeal_after_duration_limit_expiration():
+    # this is for PBN and post/comment ban appeals only
+    # for RSP, RSF and TBN it is handled during removing restrict/ban job
+    db: Session = next(get_db())
+
+    # PBN
+    # join user_restrict_ban_detail with user_content_restrict_ban_appeal_detail
+    # to get PBN user pending appeals which have crossed 30 day limit
+    pbn_users_pending_appeal_expired_limit = (
+        db.query(
+            admin_model.UserRestrictBanDetail.id.label("ban_id"),
+            admin_model.UserRestrictBanDetail.user_id.label("user_id"),
+            admin_model.UserContentRestrictBanAppealDetail.id.label("appeal_id"),
+        )
+        .join(
+            admin_model.UserContentRestrictBanAppealDetail,
+            admin_model.UserRestrictBanDetail.report_id
+            == admin_model.UserContentRestrictBanAppealDetail.report_id,
+        )
+        .filter(
+            admin_model.UserRestrictBanDetail.status == "PBN",
+            admin_model.UserRestrictBanDetail.is_active == True,
+            admin_model.UserRestrictBanDetail.is_deleted == False,
+            admin_model.UserContentRestrictBanAppealDetail.status.in_(["OPN", "URV"]),
+            func.now()
+            >= (
+                admin_model.UserContentRestrictBanAppealDetail.created_at
+                + timedelta(days=30)
+            ),
+        )
+        .all()
+    )
+    if pbn_users_pending_appeal_expired_limit:
+        # get ban ids
+        pbn_expired_pending_appeal_ban_entry_ids = [
+            getattr(join_entry, "ban_id")
+            for join_entry in pbn_users_pending_appeal_expired_limit
+        ]
+
+        # get user ids
+        pbn_expired_pending_appeal_user_ids = [
+            getattr(join_entry, "user_id")
+            for join_entry in pbn_users_pending_appeal_expired_limit
+        ]
+
+        # get appeal ids
+        pbn_expired_pending_appeal_ids = [
+            getattr(join_entry, "appeal_id")
+            for join_entry in pbn_users_pending_appeal_expired_limit
+        ]
+
+        # get ban entries
+        pbn_expired_pending_appeal_ban_entries = (
+            admin_service.get_users_active_restrict_ban_entry_id(
+                restrict_ban_id_list=pbn_expired_pending_appeal_ban_entry_ids,
+                db_session=db,
+            )
+        )
+
+        # get users
+        pbn_expired_pending_appeal_users = user_service.get_all_users_by_id(
+            user_id_list=pbn_expired_pending_appeal_user_ids,
             status_in_list=["PBN"],
             db_session=db,
         )
-        if users_for_scheduled_delete:
-            try:
-                # change user status to PDB
-                for user in users_for_scheduled_delete:
-                    user.status = "PDB"
 
-                # revoke the PBN by chnaging is_active to False, since the user is to be deleted permanently, ban is meaningless after this
-                pbn_expired_limit_users_query.update(
-                    {"is_active": False},
-                    synchronize_session=False,
+        # get appeals
+        pbn_expired_pending_appeals = admin_service.get_appeals_by_id(
+            appeal_id_list=pbn_expired_pending_appeal_ids, db_session=db
+        )
+
+        try:
+            # update appeal status and moderator_note
+            for appeal in pbn_expired_pending_appeals:
+                appeal.status = "CSD"
+                appeal.moderator_note = "AE"  # appeal expired
+
+            for user in pbn_expired_pending_appeal_users:
+                user.status = "PDB"
+
+            for ban_entry in pbn_expired_pending_appeal_ban_entries:
+                ban_entry.is_active = False
+
+            db.commit()
+        except SQLAlchemyError as exc:
+            db.rollback()
+            print("SQL Error:", exc)
+
+    # post/comment
+    # query the user_content_restrict_ban_appeal_detail for OPN/URV using content_type as post or comment
+    # filter for 30 day process limit
+    # change the appeal status to CSD
+    # change is_deleted to True for post/comment
+    pending_appeals = admin_service.get_all_appeals_content_id_list(
+        content_id_list=None,
+        content_type_list=["post", "comment"],
+        status_in_list=["OPN", "URV"],
+        db_session=db,
+    )
+    if pending_appeals:
+        for appeal in pending_appeals:
+            appeal.status = "CSD"
+            appeal.moderator_note = "AE"  # appeal expired
+
+        # get the content ids
+        appealed_post_ids = {
+            appeal_entry.content_id
+            for appeal_entry in pending_appeals
+            if appeal_entry.content_type == "post"
+        }
+        appealed_comment_ids = {
+            appeal_entry.content_id
+            for appeal_entry in pending_appeals
+            if appeal_entry.content_type == "comment"
+        }
+
+        # get the posts
+        appealed_posts_query = post_service.get_all_posts_by_id_query(
+            post_id_list=list(appealed_post_ids), status_in_list=["BAN"], db_session=db
+        )
+
+        # get the comments
+        appealed_comments_query = comment_service.get_all_comments_by_id_query(
+            comment_id_list=list(appealed_comment_ids),
+            status_in_list=["BAN"],
+            db_session=db,
+        )
+
+        try:
+            # update is_deleted to True
+            appealed_posts_query.update(
+                {"is_deleted": True},
+                synchronize_session=False,
+            )
+            appealed_comments_query.update(
+                {"is_deleted": True},
+                synchronize_session=False,
+            )
+        except SQLAlchemyError as exc:
+            db.rollback()
+            print("SQL Error:", exc)
+
+    print("Close Appeal. Job Done")
+
+
+def reduce_violation_score_quarterly():
+    # get the user ids of latest reports which are resolved, appeals for reports if any are not accepted, and are older than 3 months
+    # meaning there should be no violation of user in last three months for score to reduce by 50%
+
+    db: Session = next(get_db())
+
+    # join user_content_report_detail and user_content_restrict_ban_appeal_detail
+    report_appeal_join = (
+        db.query(admin_model.UserContentReportDetail.reported_user_id)
+        .join(
+            admin_model.UserContentRestrictBanAppealDetail,
+            admin_model.UserContentReportDetail.id
+            == admin_model.UserContentRestrictBanAppealDetail.report_id,
+            isOuter=True,
+        )
+        .filter(
+            admin_model.UserContentReportDetail.status == "RSD",
+            admin_model.UserContentRestrictBanAppealDetail.status.notin_(
+                ["ACP", "ACR"]
+            ),
+            func.now()
+            > (admin_model.UserContentReportDetail.updated_at + timedelta(days=91)),
+        )
+        .all()
+    )
+
+    # get the user ids
+    no_violation_three_months_user_ids = [item[0] for item in report_appeal_join]
+
+    # fetch guideline_violation_score entry and reduce the scores by 50% in all
+    guideline_violation_score_entries_query = (
+        admin_service.get_users_guideline_violation_score_query(
+            user_id_list=no_violation_three_months_user_ids, db_session=db
+        )
+    )
+    guideline_violation_score_entries = guideline_violation_score_entries_query.all()
+    if guideline_violation_score_entries:
+        try:
+            reduce_rate = 0.50
+            for entry in guideline_violation_score_entries:
+                entry.post_score = round(entry.post_score * reduce_rate)
+                entry.comment_score = round(entry.comment_score * reduce_rate)
+                entry.message_score = round(entry.message_score * reduce_rate)
+                entry.final_violation_score = round(
+                    entry.final_violation_score * reduce_rate
                 )
 
-                db.commit()
-            except SQLAlchemyError as exc:
-                db.rollback()
-                print("SQL Error:", exc)
+            db.commit()
+        except SQLAlchemyError as exc:
+            db.rollback()
+            print("SQL Error:", exc)
 
-
-# def reduce_violation_score_quarterly(db_session = next(get_db())):
-#     # get the user ids of latest reports which are resolved, appeals for reports if any are not accepted, and are older than 3 months
-#     # meaning there should be no violation of user in last three months for score to reduce by 25%
+    print("Score Reduction. Job Done")

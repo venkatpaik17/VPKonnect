@@ -125,7 +125,7 @@ class UserDeactivationDeletion(BaseModel):
     hide_interactions: bool = False
 
 
-class UserSendEmail(BaseModel):
+class UserSendVerifyEmail(BaseModel):
     email: EmailStr
     type: str
 
@@ -148,3 +148,16 @@ class UserContentAppeal(BaseModel):
     content_type: str
     content_id: UUID | None
     detail: str
+    case_number: int | None
+
+    @validator("content_id")
+    def validate_content_id(cls, val, values):
+        content_type_val = values["content_type"]
+        # if post/comment doesn't have content_id or account have content_id
+        if (content_type_val in ("post", "comment") and not val) or (
+            content_type_val == "account" and val
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid request. Issue with content ID",
+            )

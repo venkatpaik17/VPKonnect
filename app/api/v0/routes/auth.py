@@ -87,7 +87,7 @@ def user_login(
 
     # check and get user restrict/ban entry if any
     restrict_ban_entry = admin_service.get_user_active_restrict_ban_entry(
-        user_id=str(user.id), status_in_list=["RSP", "RSF", "TBN", "PBN"], db_session=db
+        user_id=str(user.id), db_session=db
     )
 
     try:

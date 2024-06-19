@@ -1,7 +1,9 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from math import floor, inf
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Form, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, status
+from pydantic import EmailStr
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -17,6 +19,7 @@ from app.services import employee as employee_service
 from app.services import post as post_service
 from app.services import user as user_service
 from app.utils import auth as auth_utils
+from app.utils import email as email_utils
 from app.utils import map as map_utils
 
 router = APIRouter(prefix=settings.api_prefix + "/admin", tags=["Admin"])
@@ -103,6 +106,52 @@ def get_reported_items(
     return all_reports_response
 
 
+# reports dashboard
+@router.get(
+    "/reports/{report_status}", response_model=list[admin_schema.AllReportResponse]
+)
+def get_reports_dashboard(
+    report_status: str,
+    moderator_emp_id: str,
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role="content_mgmt")
+    ),
+):
+    # get curr employee
+    curr_moderator_employee = employee_service.get_employee_by_work_email(
+        work_email=str(current_employee.email), db_session=db
+    )
+
+    # check identity
+    if curr_moderator_employee.emp_id != moderator_emp_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to peform requested action",
+        )
+
+    # get reports based on status and moderator
+    all_reports = admin_service.get_all_reports_by_status_moderator_id_reported_at(
+        status=report_status,
+        moderator_id=curr_moderator_employee.moderator_id,
+        reported_at=None,
+        db_session=db,
+    )
+
+    all_reports_response = None
+    if all_reports:
+        all_reports_response = [
+            admin_schema.AllReportResponse(
+                case_number=report.case_number,
+                status=report.status,
+                reported_at=report.created_at,
+            )
+            for report in all_reports
+        ]
+
+    return all_reports_response
+
+
 # get a report
 @router.get("/reports/{case_number}")
 def get_requested_report(
@@ -113,7 +162,7 @@ def get_requested_report(
         auth_utils.AccessRoleDependency(role="content_mgmt")
     ),
 ):
-    # get current employee
+    # get current employee__dict__
     curr_moderator_employee = employee_service.get_employee_by_work_email(
         str(current_employee.email), db
     )
@@ -126,6 +175,25 @@ def get_requested_report(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
         )
+
+    # for account type and status RSD/RSR/FRS/FRR, we need to fetch the flagged/banned posts
+    flagged_banned_posts_ids = []
+    if (
+        requested_report.reported_item_type == "account"
+        and requested_report.status in ("RSD, RSR, FRS, FRR")
+    ):
+        flagged_banned_posts = (
+            admin_service.get_all_valid_flagged_content_account_report_id(
+                report_id=requested_report.id, db_session=db
+            )
+        )
+        if not flagged_banned_posts:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Flagged/Banned posts associated with account report not found",
+            )
+
+        flagged_banned_posts_ids = [post[0] for post in flagged_banned_posts]
 
     # get the required objects (User, Post, Comment) and other parameters
     # prepare the response object
@@ -163,6 +231,7 @@ def get_requested_report(
             or (requested_report.comment.__dict__ if requested_report.comment else None)
             or requested_report.account.__dict__
         ),
+        "flagged_banned_posts": flagged_banned_posts_ids,
         "case_number": requested_report.case_number,
         "report_reason": map_utils.report_reasons_code_dict.get(
             requested_report.report_reason
@@ -195,7 +264,7 @@ def get_all_related_open_reports_for_specific_report(
         auth_utils.AccessRoleDependency(role="content_mgmt")
     ),
 ):
-    # get the report using case_number
+    # get the report using case_number (OPN or URV, sometimes we may need to check OPN reports for a URV report too)
     specific_report = admin_service.get_a_report(
         case_number, "OPN", db
     ) or admin_service.get_a_report(case_number, "URV", db)
@@ -276,6 +345,7 @@ def selected_reports_under_review_update(
 @router.post("/reports/action/auto")
 def enforce_report_action_auto(
     action_request: admin_schema.EnforceReportActionAuto,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.AccessRoleDependency(role="content_mgmt")
@@ -456,7 +526,8 @@ def enforce_report_action_auto(
     new_final_violation_score = curr_final_violation_score + effective_score
 
     no_action = False
-    action_duration = (None, None)
+    violation_status = ""
+    violation_duration = 0
     # if the score has not changed, then no action/duration, especially for minimal
     if curr_final_violation_score == new_final_violation_score:
         no_action = True
@@ -466,11 +537,14 @@ def enforce_report_action_auto(
                 new_final_violation_score
             )
         )
-        if action_duration[0] is None:
+        violation_status = str(action_duration[0])
+        violation_duration = int(action_duration[1])
+
+        if violation_status == "UND":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="No action found"
             )
-        elif action_duration[0] == "NA":
+        elif violation_status == "NA":
             no_action = True
 
     # set the score_type and get curr_score for the content type
@@ -491,7 +565,11 @@ def enforce_report_action_auto(
     # If active action then update user_content_report_event_timeline using trigger, guideline_violation_score, guideline_violation_last_added_score and user tables
     # so updating user_content_report_detail, user_content_report_event_timeline using trigger and guideline_violation_score tables are common operations for both
     # also another common operation is to handle other under review reports if any, related to this content report, they need to be closed.
-    message = None
+    message = ""
+    new_user_restrict_ban = None
+    is_active = None
+    enforce_action_at = None
+
     if no_action:
         message = f"Request processed successfully. Report case number {action_request.case_number} resolved."
 
@@ -517,10 +595,6 @@ def enforce_report_action_auto(
             .first()
         )
 
-        new_user_retrict_ban = None
-        is_active = None
-        enforce_action_at = None
-
         # there is a active restrict/ban and also there is/are future restricts/bans in line
         if user_active_restrict_ban and user_future_restrict_ban:
             enforce_time = user_future_restrict_ban.enforce_action_at + timedelta(
@@ -542,9 +616,9 @@ def enforce_report_action_auto(
             is_active = True
             enforce_action_at = func.now()
 
-        new_user_retrict_ban = admin_model.UserRestrictBanDetail(
-            status=action_duration[0],
-            duration=action_duration[1],
+        new_user_restrict_ban = admin_model.UserRestrictBanDetail(
+            status=violation_status,
+            duration=violation_duration,
             user_id=reported_user.id,
             is_active=is_active,
             content_type=report.reported_item_type,
@@ -555,17 +629,17 @@ def enforce_report_action_auto(
 
         try:
             # add restrict/ban entry
-            db.add(new_user_retrict_ban)
+            db.add(new_user_restrict_ban)
 
             # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or user is deactivated/inactive and action is PBN), else don't update
-            if new_user_retrict_ban.is_active and (
+            if new_user_restrict_ban.is_active and (
                 not user_deactivated_inactive
-                or (user_deactivated_inactive and action_duration[0] == "PBN")
+                or (user_deactivated_inactive and violation_status == "PBN")
             ):
                 # reported_user_query.update(
                 #     {"status": action_duration[0]}, synchronize_session=False
                 # )
-                reported_user.status = action_duration[0]
+                reported_user.status = violation_status
 
             db.commit()
 
@@ -683,6 +757,36 @@ def enforce_report_action_auto(
             detail="Error processing request",
         ) from exc
 
+    # send email if action status is TBN/PBN
+    if new_user_restrict_ban and violation_status in ("TBN", "PBN"):
+        # generate appeal link
+        appeal_link = "https://vpkonnect.in/accounts/appeals/form_ban"
+        email_subject = "VPKonnect - Account Ban"
+        email_details = admin_schema.SendEmail(
+            template=(
+                "permanent_ban_email.html"
+                if violation_status == "PBN"
+                else "temporary_ban_email.html"
+            ),
+            email=[EmailStr(reported_user.email)],
+            body_info={
+                "username": reported_user.username,
+                "link": appeal_link,
+                "days": violation_duration // 24,
+                "ban_enforced_datetime": new_user_restrict_ban.enforce_action_at.strftime(
+                    "%b %d, %Y %H:%M %Z"
+                ),
+            },
+        )
+
+        try:
+            email_utils.send_email(email_subject, email_details, background_tasks)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error sending email.",
+            ) from exc
+
     moderator_note_full = map_utils.create_violation_moderator_notes(
         username=reported_user.username,
         moderator_note=report.moderator_note,
@@ -706,6 +810,7 @@ def enforce_report_action_auto(
 @router.post("/reports/action/manual")
 def enforce_report_action_manual(
     action_request: admin_schema.EnforceReportActionManual,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.AccessRoleDependency(role="content_mgmt")
@@ -830,12 +935,9 @@ def enforce_report_action_manual(
             open_related_reports_put_under_review_message = f"Additional {len(open_related_reports_case_numbers)} related report(s), case number(s): {open_related_reports_case_numbers} was/were put under review and was/were included in this action request"
 
     # map action, duration with minimum required violation score
-    action_duration = (
-        action_request.action,
-        action_request.duration,
+    min_req_violation_score = map_utils.action_entry_score_dict.get(
+        (action_request.action, action_request.duration)
     )
-
-    min_req_violation_score = map_utils.action_entry_score_dict.get(action_duration)  # type: ignore
     if not min_req_violation_score:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -931,9 +1033,9 @@ def enforce_report_action_manual(
         is_active = True
         enforce_action_at = func.now()
 
-    new_user_retrict_ban = admin_model.UserRestrictBanDetail(
-        status=action_duration[0],
-        duration=action_duration[1],
+    new_user_restrict_ban = admin_model.UserRestrictBanDetail(
+        status=action_request.action,
+        duration=action_request.duration,
         user_id=reported_user.id,
         is_active=is_active,
         content_type=report.reported_item_type,
@@ -942,9 +1044,93 @@ def enforce_report_action_manual(
         enforce_action_at=enforce_action_at,
     )
 
+    # add restrict/ban entry and update user status if needed
     try:
         # add restrict/ban entry
-        db.add(new_user_retrict_ban)
+        db.add(new_user_restrict_ban)
+
+        # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or user is deactivated/inactive and action is PBN, else don't update
+        if (
+            is_active
+            and not user_deactivated_inactive
+            or (user_deactivated_inactive and action_request.action == "PBN")
+        ):
+            # reported_user_query.update(
+            #     {"status": action_duration[0]}, synchronize_session=False
+            # )
+            reported_user.status = action_request.action
+
+        db.commit()
+        # db.refresh(new_user_restrict_ban)
+    except SQLAlchemyError as exc:
+        print(exc)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing request",
+        ) from exc
+
+    try:
+        # handled seperately
+        # ban the contents flagged by manual/auto process, if reported_item_type is account
+        if (
+            report.reported_item_type == "account"
+            and action_request.contents_to_be_banned
+        ):
+            flagged_posts_not_found = []
+            for post_id in action_request.contents_to_be_banned:
+                post_to_be_banned = post_service.get_a_post(
+                    post_id=str(post_id),
+                    status_not_in_list=["DRF", "DEL", "BAN", "FLB", "FLD"],
+                    db_session=db,
+                )
+                # if flagged post not found then append it to the list and skip the rest of the operations, if found, then append to valid_flagged_posts
+                if not post_to_be_banned:
+                    flagged_posts_not_found.append(post_id)
+                    continue
+                else:
+                    valid_flagged_content = admin_model.AccountReportFlaggedContent(
+                        report_id=report.id, valid_flagged_content=post_id
+                    )
+                    db.add(valid_flagged_content)
+
+                # ban the flagged post if active action
+                # else, flag the post to be banned when action is enforced in future
+                if is_active:
+                    post_to_be_banned.status = "BAN"
+                else:
+                    post_to_be_banned.status = "FLB"
+
+            number_of_posts_not_found = len(flagged_posts_not_found)
+            number_of_flagged_posts_request = len(action_request.contents_to_be_banned)
+            # if all the flagegd posts are not found then we need to raise the exception for moderator to look up account again
+            if number_of_posts_not_found == number_of_flagged_posts_request:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="All posts flagged to be banned not found",
+                )
+
+            # adjust the violation scores as per the number of flagged posts
+            # to make sure the violation scores are divisible by number of valid flagged posts
+            number_of_valid_flagged_posts = (
+                number_of_flagged_posts_request - number_of_posts_not_found
+            )
+
+            score_remainder_adjust = (
+                new_final_violation_score % number_of_valid_flagged_posts
+            )
+            score_adjust = abs(number_of_valid_flagged_posts - score_remainder_adjust)
+            new_final_violation_score = new_final_violation_score + score_adjust
+            new_content_score = (
+                new_content_score + score_adjust
+                if new_content_score != curr_score
+                else new_content_score
+            )
+            new_last_added_score = (
+                new_last_added_score + score_adjust
+                if new_last_added_score != 0
+                else new_last_added_score
+            )
 
         # if active action
         if is_active:
@@ -970,15 +1156,6 @@ def enforce_report_action_manual(
                     report_id=report.id,
                 )
             )
-
-            # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or user is deactivated/inactive and action is PBN, else don't update
-            if not user_deactivated_inactive or (
-                user_deactivated_inactive and action_duration[0] == "PBN"
-            ):
-                # reported_user_query.update(
-                #     {"status": action_duration[0]}, synchronize_session=False
-                # )
-                reported_user.status = action_duration[0]
 
             # ban content only if reported_item_type is post/comment
             # only if is_active is True, meaning action is enforced now
@@ -1045,53 +1222,6 @@ def enforce_report_action_manual(
                     related_report.status = "CSD"
                     related_report.moderator_note = "RF"
 
-        # handled seperately
-        # ban the contents flagged by manual/auto process, if reported_item_type is account
-        if (
-            report.reported_item_type == "account"
-            and action_request.contents_to_be_banned
-        ):
-            flagged_posts_not_found = []
-            valid_flagged_posts = []
-            for post_id in action_request.contents_to_be_banned:
-                post_to_be_banned = post_service.get_a_post(
-                    post_id=str(post_id),
-                    status_not_in_list=["DRF", "DEL", "BAN", "FLB", "FLD"],
-                    db_session=db,
-                )
-                # if flagged post not found then append it to the list and skip the rest of the operations, if found, then append to valid_flagged_posts
-                if not post_to_be_banned:
-                    flagged_posts_not_found.append(post_id)
-                    continue
-                else:
-                    valid_flagged_posts.append(post_id)
-
-                # ban the flagged post if active action
-                # else, flag the post to be banned when action is enforced in future
-                if is_active:
-                    post_to_be_banned.status = "BAN"
-                else:
-                    post_to_be_banned.status = "FLB"
-
-            # if all the flagegd posts are not found then we need to raise the exception for moderator to look up account again
-            if len(flagged_posts_not_found) == len(
-                action_request.contents_to_be_banned
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="All posts flagged to be banned not found",
-                )
-
-            # add the process-flagged post(s) (all and valid) to the account_report_flagged_content table
-            new_account_report_flagged_content = (
-                admin_model.AccountReportFlaggedContent(
-                    flagged_content=action_request.contents_to_be_banned,
-                    valid_flagged_content=valid_flagged_posts,
-                    report_id=report.id,
-                )
-            )
-            db.add(new_account_report_flagged_content)
-
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
@@ -1103,6 +1233,37 @@ def enforce_report_action_manual(
     except HTTPException as exc:
         db.rollback()
         raise exc
+
+    # send email if action status is TBN/PBN
+    if new_user_restrict_ban and action_request.action in ("TBN", "PBN"):
+        # generate appeal link
+        appeal_link = "https://vpkonnect.in/accounts/appeals/form_ban"
+
+        email_subject = "VPKonnect - Account Ban"
+        email_details = admin_schema.SendEmail(
+            template=(
+                "permanent_ban_email.html"
+                if action_request.action == "PBN"
+                else "temporary_ban_email.html"
+            ),
+            email=[EmailStr(reported_user.email)],
+            body_info={
+                "username": reported_user.username,
+                "link": appeal_link,
+                "days": action_request.duration // 24,
+                "ban_enforced_datetime": new_user_restrict_ban.enforce_action_at.strftime(
+                    "%b %d, %Y %H:%M %Z"
+                ),
+            },
+        )
+
+        try:
+            email_utils.send_email(email_subject, email_details, background_tasks)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error sending email.",
+            ) from exc
 
     moderator_note_full = map_utils.create_violation_moderator_notes(
         username=reported_user.username,

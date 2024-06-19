@@ -317,12 +317,7 @@ class AccountReportFlaggedContent(Base):
         primary_key=True,
         server_default=func.generate_ulid(),
     )
-    flagged_content = Column(
-        ARRAY(UUID(as_uuid=True), dimensions=1), nullable=False, default=[]
-    )
-    valid_flagged_content = Column(
-        ARRAY(UUID(as_uuid=True), dimensions=1), nullable=False, default=[]
-    )
+    valid_flagged_content = Column(UUID(as_uuid=True), nullable=False)
     report_id = Column(
         UUID(as_uuid=True),
         ForeignKey("user_content_report_detail.id", ondelete="CASCADE"),

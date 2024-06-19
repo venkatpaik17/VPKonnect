@@ -1,19 +1,29 @@
+from datetime import timedelta
 from time import sleep
 
+from fastapi import BackgroundTasks
+from pydantic import EmailStr
 from sqlalchemy import event, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.orm.attributes import get_history
 
 from app.api.v0.routes import auth as auth_route
+from app.db.db_sqlalchemy import metadata
 from app.db.session import get_db
 from app.models import admin as admin_model
 from app.models import user as user_model
+from app.schemas import admin as admin_schema
 from app.schemas import auth as auth_schema
 from app.services import admin as admin_service
 from app.services import comment as comment_service
 from app.services import post as post_service
 from app.services import user as user_service
+from app.utils import email as email_utils
+from app.utils import job_task as job_task_utils
+
+# reflect database schema into the MetaData object
+metadata.reflect(views=True)
 
 # mapper events
 # this event listener will only work if ORM style updates are done instead of query updates
@@ -100,20 +110,14 @@ event.listen(
 
 # event listener for if appeal status updates to ACP from URV i.e. if appeal is accepted
 # First we join appeal table with restrict/ban table
-# Appeal type is account
-#     - We will get the post/comment associated with the restrict/ban
-#     - So we can unban the content too along with removal of user's restrict/ban
-# Appeal type is post/comment
-#     - Case 1:
-#         - We will get the restrict/ban associated with that post/comment
-#         - So we can remove the restrict/ban on user along with post/comment unban
-#     - Case 2:
-#         - There is no restrict/ban entry for the appeal post/comment
-#         - So only unban the post/comment
 
 
 def user_restrict_ban_detail_user_operation(
-    user_id: str, report_id: str, status: str, db: Session
+    user_id: str,
+    report_id: str,
+    status: str,
+    db: Session,
+    background_tasks: BackgroundTasks,
 ):
     current_entry = admin_service.get_user_active_restrict_ban_entry_user_id_report_id(
         user_id=user_id, status=status, report_id=report_id, db_session=db
@@ -161,17 +165,9 @@ def user_restrict_ban_detail_user_operation(
 
     consecutive_violation = consecutive_violation_query.first()
 
-    # get user
-    user = user_service.get_user_by_id(
-        user_id,
-        ["DAH", "DAK", "PDH", "PDK", "INA", "ACT", "DEL"],
-        db,
-    )
-    if not user:
-        raise Exception("Error. User entry for changing status not found")
-
+    user_inactive_deactivated = ["DAH", "DAK", "PDH", "PDK", "INA"]
     if consecutive_violation:
-        # enforce next restrict/ban, this will be early enforce
+        # enforce next violation, this will be early enforce
         consecutive_violation_query.update(
             {
                 "is_active": True,
@@ -181,14 +177,68 @@ def user_restrict_ban_detail_user_operation(
             synchronize_session=False,
         )
 
-        # update user status
-        user.status = consecutive_violation.status
+        # get user
+        user = user_service.get_user_by_id(
+            str(consecutive_violation.user_id),
+            ["ACT", "TBN", "PBN", "DEL"],
+            db,
+        )
+        if user:
+            job_task_utils.consecutive_violation_operations(
+                consecutive_violation=consecutive_violation, db=db
+            )
+
+            # send email if status is TBN/PBN
+            if consecutive_violation.status == "PBN" or (
+                consecutive_violation.status == "TBN"
+                and user.status not in user_inactive_deactivated
+            ):
+                # generate appeal link
+                appeal_link = "https://vpkonnect.in/accounts/appeals/form_ban"
+
+                email_subject = "VPKonnect - Account Ban"
+                email_details = admin_schema.SendEmail(
+                    template=(
+                        "permanent_ban_email.html"
+                        if consecutive_violation.status == "PBN"
+                        else "temporary_ban_email.html"
+                    ),
+                    email=[EmailStr(user.email)],
+                    body_info={
+                        "username": user.username,
+                        "link": appeal_link,
+                        "days": consecutive_violation.duration // 24,
+                        "ban_enforced_datetime": consecutive_violation.enforce_action_at.strftime(
+                            "%b %d, %Y %H:%M %Z"
+                        ),
+                    },
+                )
+
+                email_utils.send_email(email_subject, email_details, background_tasks)
+
+            # update user status
+            if user.status not in user_inactive_deactivated or (
+                user.status in user_inactive_deactivated
+                and consecutive_violation.status == "PBN"
+            ):
+                user.status = consecutive_violation.status
+
+        else:
+            raise Exception("Error. User entry for changing status not found")
+
     else:
-        user.status = "ACT"
+        user = user_service.get_user_by_id(user_id, ["ACT", "TBN", "PBN", "DEL"], db)
+        if user and user.status not in user_inactive_deactivated:
+            user.status = "ACT"
 
 
 def guideline_violation_score_last_added_score_operation(
-    user_id: str, report_id: str, ban_content_type: str, db: Session
+    user_id: str,
+    report_id: str,
+    ban_content_type: str,
+    db: Session,
+    account_report_flagged_posts: int,
+    posts_to_be_unbanned: int,
 ):
     # get guideline violation score entry
     guideline_violation_score_entry_query = (
@@ -230,6 +280,12 @@ def guideline_violation_score_last_added_score_operation(
     last_added_score = last_added_score_entry.last_added_score
     curr_final_violation_score = guideline_violation_score_entry.final_violation_score
 
+    # for account report cases, where many flagged posts are involved, some posts unbanned through different appeals, some remain unbanned or not unbanned at all
+    # So only the fraction of last_added_score will be considered
+    effective_last_added_score = int(
+        (posts_to_be_unbanned / account_report_flagged_posts) * last_added_score
+    )
+
     # adjust the scores (appropriate content score and final violation score)
     # if scores after adjustment goes -ve, make it 0
     diff_score = max(curr_score - last_added_score, 0)
@@ -267,7 +323,6 @@ def post_comment_operation(ban_content_id: str, ban_content_type: str, db: Sessi
         )
         if not comment_entry:
             raise Exception("Error. Comment to be unbanned not found")
-            return None
 
         # update status to PUB
         comment_entry.status = "PUB"
@@ -281,23 +336,32 @@ def appeal_status_accept_after_update_attribute_listener(
     print(oldvalue)
     print(value)
     sleep(3)
+
+    # Access the reflected view
+    join_view = metadata.tables["appeal_restrict_join_view"]
+
     if oldvalue is not None and (oldvalue == "URV" and value == "ACP"):
         print("Hello")
         db = next(get_db())
 
-        join_model = aliased(admin_model.AppealRestrictJoinView)
-        # query the view
-        appeal_restrict_join_entries_query = db.query(join_model)
-        print(appeal_restrict_join_entries_query)
+        # join_model = aliased(admin_model.AppealRestrictJoinView)
 
-        print(appeal_restrict_join_entries_query.all())
+        # query the view
+        appeal_restrict_join_entries_query = db.query(join_view)
         print(target.user_id)
 
-        restrict_ban_entry = appeal_restrict_join_entries_query.filter(
-            join_model.user_id == target.user_id,
-            join_model.report_id == target.report_id,
+        # get the required entry using user id and report id
+        restrict_ban_appeal_entry_query = appeal_restrict_join_entries_query.filter(
+            join_view.c.user_id == target.user_id,
+            join_view.c.report_id == target.report_id,
+            join_view.c.user_restrict_ban_is_deleted == False,
         )
-        print(restrict_ban_entry.first())
+
+        restrict_ban_appeal_entry = restrict_ban_appeal_entry_query.first()
+        if not restrict_ban_appeal_entry:
+            raise Exception("Error. Entry associated with accepted appeal not found")
+
+        print(restrict_ban_appeal_entry)
 
         query_user_id = target.user_id
         query_report_id = target.report_id
@@ -307,141 +371,115 @@ def appeal_status_accept_after_update_attribute_listener(
 
         try:
             print("Hello1")
-            # based on target appeal type we go with the operations
+
             if target.content_type == "account":
-                restrict_ban_entry_acc = restrict_ban_entry.filter(
-                    join_model.user_restrict_ban_is_deleted == False
-                ).first()
+                # Appeal type: account, Report type: account
                 if (
-                    restrict_ban_entry_acc
-                    and restrict_ban_entry_acc.user_restrict_ban_is_active == True
+                    restrict_ban_appeal_entry.user_restrict_ban_content_type
+                    == "account"
                 ):
-                    # check the content_type for restrict/ban
-                    if (
-                        restrict_ban_entry_acc.user_restrict_ban_content_type
-                        == "account"
-                    ):
-                        # update is_active to False
-                        # check for next successive violation and enforce it (is_active to True, enforce_action_at to func.now(), is_enforce_action_early to true)
-                        # update user status
-                        # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
-                        query_status = restrict_ban_entry_acc.user_restrict_ban_status
-                        query_content_type = (
-                            restrict_ban_entry_acc.user_restrict_ban_content_type
-                        )
-                        user_restrict_ban_detail_user_operation(
-                            user_id=query_user_id,
-                            report_id=query_report_id,
-                            status=query_status,
-                            db=db,
-                        )
-                        guideline_violation_score_last_added_score_operation(
-                            user_id=query_user_id,
-                            report_id=query_report_id,
-                            ban_content_type=query_content_type,
-                            db=db,
-                        )
-
-                    elif restrict_ban_entry_acc.user_restrict_ban_content_type in (
-                        "post",
-                        "comment",
-                    ):
-                        # update is_active to False
-                        # check for next successive violation and enforce it (is_active to True, enforce_action_at to func.now(), is_enforce_action_early to true)
-                        # update user status
-                        # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
-                        # get the user_restrict_ban_content_id, user_restrict_ban_content_type and query the table and update status to PUB from BAN
-                        query_status = restrict_ban_entry_acc.user_restrict_ban_status
-                        query_content_type = (
-                            restrict_ban_entry_acc.user_restrict_ban_content_type
-                        )
-                        query_content_id = (
-                            restrict_ban_entry_acc.user_restrict_ban_content_id
-                        )
-                        user_restrict_ban_detail_user_operation(
-                            user_id=query_user_id,
-                            report_id=query_report_id,
-                            status=query_status,
-                            db=db,
-                        )
-                        guideline_violation_score_last_added_score_operation(
-                            user_id=query_user_id,
-                            report_id=query_report_id,
-                            ban_content_type=query_content_type,
-                            db=db,
-                        )
-                        post_comment_operation(
-                            ban_content_id=query_content_id,
-                            ban_content_type=query_content_type,
-                            db=db,
-                        )
-
-                else:
-                    raise Exception("Error. Account appeal event processing failed")
-
-            elif target.content_type in ("post", "comment"):
-                print("Hello2")
-                restrict_ban_entry_pc = restrict_ban_entry.first()
-                print(restrict_ban_entry)
-                if restrict_ban_entry_pc and restrict_ban_entry_pc.is_active == True:
-                    print("Hello3")
-                    # appeal post/comment is involved in a restrict/ban
-                    # get the user_restrict_ban_content_id, user_restrict_ban_content_type and query the table and update status to PUB from BAN
-                    # update is_active to False
-                    # check for next successive violation and enforce it (is_active to True, enforce_action_at to func.now(), is_enforce_action_early to true)
-                    # update user status (check for deactivate/inactive)
+                    # fetch the flagged posts from account_report_flagged_content, check if all or partial no of posts, change the status from BAN to PUB
                     # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
-                    query_status = restrict_ban_entry_pc.user_restrict_ban_status
-                    query_content_id = (
-                        restrict_ban_entry_pc.user_restrict_ban_content_id
+                    # revoke the active restrict/ban, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status
+                    account_report_valid_flagged_content = (
+                        admin_service.get_all_valid_flagged_content_account_report_id(
+                            report_id=query_report_id, db_session=db
+                        )
                     )
+                    account_report_flagged_content_ids = [
+                        content[0] for content in account_report_valid_flagged_content
+                    ]
+                    no_of_flagged_posts = len(account_report_flagged_content_ids)
+
+                    account_report_flagged_posts = (
+                        post_service.get_all_posts_by_id_query(
+                            post_id_list=account_report_flagged_content_ids,
+                            status_in_list=["BAN"],
+                            db_session=db,
+                        ).all()
+                    )
+                    no_of_banned_posts = len(account_report_flagged_posts)
+
+                    for post in account_report_flagged_posts:
+                        post.status = "PUB"
+
                     query_content_type = (
-                        restrict_ban_entry_pc.user_restrict_ban_content_type
-                    )
-                    post_comment_operation(
-                        ban_content_id=query_content_id,
-                        ban_content_type=query_content_type,
-                        db=db,
-                    )
-                    user_restrict_ban_detail_user_operation(
-                        user_id=query_user_id,
-                        report_id=query_report_id,
-                        status=query_status,
-                        db=db,
+                        restrict_ban_appeal_entry.user_restrict_ban_content_type
                     )
                     guideline_violation_score_last_added_score_operation(
                         user_id=query_user_id,
                         report_id=query_report_id,
                         ban_content_type=query_content_type,
                         db=db,
+                        account_report_flagged_posts=no_of_flagged_posts,
+                        posts_to_be_unbanned=no_of_banned_posts,
                     )
 
-                elif restrict_ban_entry_pc and restrict_ban_entry_pc.is_active in (
-                    False,
-                    None,
+                    query_status = restrict_ban_appeal_entry.user_restrict_ban_status
+                    # user_restrict_ban_detail_user_operation(
+                    #     user_id=query_user_id,
+                    #     report_id=query_report_id,
+                    #     status=query_status,
+                    #     db=db,
+                    #     background_tasks=BackgroundTasks,
+                    # )
+
+                # Appeal type: account, Report type: post/comment
+                elif restrict_ban_appeal_entry.user_restrict_ban_content_type in (
+                    "post",
+                    "comment",
                 ):
-                    print("Hello4")
-                    # appeal post/comment is not involved in a restrict/ban, or maybe the user restrict/ban appeal got closed (no action)
-                    # get the ban_content_id, ban_content_type and query the table and update status to PUB from BAN
+                    # revoke the active restrict/ban, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status
+                    # fetch the banned post/comment and change the status to PUB
                     # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
-                    query_content_id = target.content_id
-                    query_content_type = target.content_type
-                    post_comment_operation(
-                        ban_content_id=query_content_id,
-                        ban_content_type=query_content_type,
-                        db=db,
-                    )
-                    guideline_violation_score_last_added_score_operation(
-                        user_id=query_user_id,
-                        report_id=query_report_id,
-                        ban_content_type=query_content_type,
-                        db=db,
-                    )
+                    pass
+            elif target.content_type in ("post", "comment"):
+                if (
+                    target.content_type == "post"
+                    and restrict_ban_appeal_entry.user_restrict_ban_content_type
+                    == "account"
+                ):
+                    # Appeal type: post, Report type: account, (RSP/RSF, active restrict)
+                    if restrict_ban_appeal_entry.user_restrict_ban_is_active == "True":
+                        # fetch the post, change the status to PUB
+                        # fetch the flagged posts from account_report_flagged_content
+                        #     check if all the flagged posts have PUB status, if yes then revoke the restrict, else don't
+                        #     adjust the scores in guideline violation score table
+                        # If all posts have their bans revoked then only fetch last added score and manage it, update is_removed to True
+                        #     Else don't touch the last added score table
+                        # if restrict is revoked, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status
+                        pass
+                    # Appeal type: post, Report type: account (RSP/RSF, no active restrict)
+                    else:
+                        # fetch the post, change status to PUB
+                        # adjust the scores in guideline violation score table
+                        pass
+                elif restrict_ban_appeal_entry.user_restrict_ban_content_type in (
+                    "post",
+                    "comment",
+                ):
+                    # Appeal type: post/comment, Report type: post/comment (active restrict/ban)
+                    if restrict_ban_appeal_entry.user_restrict_ban_is_active == "True":
+                        # fetch the banned post/comment, update status to PUB
+                        # revoke the active restrict/ban, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status
+                        # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
+                        pass
+                    # Appeal type: post/comment, Report type: post/comment (active restrict/ban concluded)
+                    elif (
+                        restrict_ban_appeal_entry.user_restrict_ban_is_active == "False"
+                    ):
+                        # fetch the post, change status to PUB
+                        # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
+                        pass
+                    # Appeal type: post/comment, Report type: post/comment (no restrict/ban entry)
+                    elif restrict_ban_appeal_entry.user_restrict_ban_is_active is None:
+                        # fetch the post, change status to PUB
+                        pass
 
             db.commit()
         except SQLAlchemyError as exc:
             db.rollback()
-            print("SQL Error", exc)
+            print("SQL Error:", exc)
         except Exception as exc:
             db.rollback()
             print("Error", exc)
@@ -451,4 +489,96 @@ event.listen(
     admin_model.UserContentRestrictBanAppealDetail.status,
     "set",
     appeal_status_accept_after_update_attribute_listener,
+)
+
+
+# event trigger for REJ status in appeal
+def appeal_status_reject_after_update_attribute_listener(
+    target, value, oldvalue, initiator
+):
+    if oldvalue is not None and (oldvalue == "URV" and value == "REJ"):
+        db: Session = next(get_db())
+        try:
+            if target.content_type == "account":
+                # PBN
+                # get the ban entry using report id
+                # check if the appeal rejection happenned after 21 days appeal limit or not
+                # If yes, then get the user using user_id
+                # update user status to PDB
+                # update is_active of ban entry to False
+                ban_entry = admin_service.get_user_active_restrict_ban_entry_report_id(
+                    report_id=target.report_id, db_session=db
+                )
+                if not ban_entry:
+                    raise Exception(
+                        "Error. Ban entry associated with rejected appeal not found"
+                    )
+
+                if ban_entry.status == "PBN":
+                    if target.updated_at > (
+                        ban_entry.enforce_action_at + timedelta(days=21)
+                    ):
+                        # PBN user
+                        pbn_appeal_reject_user_query = (
+                            user_service.get_user_by_id_query(
+                                user_id=target.user_id,
+                                status_not_in_list=[
+                                    "ACT",
+                                    "INA",
+                                    "RSP",
+                                    "RSF",
+                                    "TBN",
+                                    "PDB",
+                                    "PDI",
+                                    "DAH",
+                                    "DAK",
+                                    "PDH",
+                                    "DEL",
+                                ],
+                                db_session=db,
+                            )
+                        )
+
+                        pbn_appeal_reject_user_query.update(
+                            {"status": "PDB"},
+                            synchronize_session=False,
+                        )
+
+                        ban_entry.is_active = False
+
+                        db.commit()
+            elif target.content_type in ("post", "comment"):
+                # post/comment
+                # get the post/comment using content id and content type
+                # check if appeal rejection happened after 21 days appeal limit or not
+                # if yes, update the is_deleted of post/comment to True
+                if target.content_type == "post":
+                    appeal_reject_post = post_service.get_a_post(
+                        post_id=str(target.content_id),
+                        status_not_in_list=["PUB", "DRF", "HID", "DEL", "FLB", "FLD"],
+                        db_session=db,
+                    )
+                    if not appeal_reject_post:
+                        raise Exception(
+                            "Error. Post associated with rejected appeal not found"
+                        )
+
+                    if target.updated_at > (
+                        appeal_reject_post.updated_at + timedelta(days=21)
+                    ):
+                        appeal_reject_post.is_deleted = True
+
+                        db.commit()
+        except SQLAlchemyError as exc:
+            db.rollback()
+            print("SQL Error:", exc)
+        except Exception as exc:
+            db.rollback()
+            print("Error", exc)
+
+
+event.listen(
+    admin_model.UserContentRestrictBanAppealDetail.status,
+    "set",
+    appeal_status_reject_after_update_attribute_listener,
 )

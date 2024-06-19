@@ -231,7 +231,7 @@ def create_user(
 
 @router.post("/send-verify-email")
 def send_verification_email_user(
-    email_user_request: user_schema.UserSendEmail,
+    email_user_request: user_schema.UserSendVerifyEmail,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
@@ -309,7 +309,7 @@ def send_verification_email_user(
         # add the token to userverificationcodetoken table
         add_user_token = auth_model.UserVerificationCodeToken(
             code_token_id=token_id,
-            type="USV",
+            type=email_user_request.type,
             user_id=user.id,
         )
         db.add(add_user_token)
@@ -493,6 +493,7 @@ def reset_password(
 # password change using reset link
 @router.post("/password/change")
 def change_password_reset(
+    background_tasks: BackgroundTasks,
     password: str = Form(),
     confirm_password: str = Form(),
     reset_token: str = Form(),
@@ -591,12 +592,32 @@ def change_password_reset(
             detail="Error processing change password request",
         ) from exc
 
+    # send mail to inform password reset
+    email_subject = "VPKonnect - Password Reset Notification"
+    email_details = admin_schema.SendEmail(
+        template="password_reset_change_notification.html",
+        email=[EmailStr(user.email)],
+        body_info={
+            "username": user.username,
+            "action": "reset",
+        },
+    )
+
+    try:
+        email_utils.send_email(email_subject, email_details, background_tasks)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error sending email.",
+        ) from exc
+
     return {"message": "Password change successful"}
 
 
 @router.post("/{username}/password/change")
 def change_password_update(
     username: str,
+    background_tasks: BackgroundTasks,
     old_password: str = Form(),
     new_password: str = Form(),
     confirm_new_password: str = Form(),
@@ -688,6 +709,25 @@ def change_password_update(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing change password request",
+        ) from exc
+
+    # send mail to inform password change
+    email_subject = "VPKonnect - Password Change Notification"
+    email_details = admin_schema.SendEmail(
+        template="password_reset_change_notification.html",
+        email=[EmailStr(user.email)],
+        body_info={
+            "username": user.username,
+            "action": "changed",
+        },
+    )
+
+    try:
+        email_utils.send_email(email_subject, email_details, background_tasks)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error sending email.",
         ) from exc
 
     return {"message": "Password change successful"}
@@ -1633,7 +1673,7 @@ def appeal_content(
 ):
     restrict_ban_entry = None
     report_entry = None
-    # get appeal user
+
     if appeal_user_request.content_type == "account":
         # get the user using username and email
         appeal_user = user_service.get_user_by_username_email(
@@ -1660,7 +1700,6 @@ def appeal_content(
         # get the ban entry
         restrict_ban_entry = admin_service.get_user_active_restrict_ban_entry(
             user_id=appeal_user.id,
-            status_in_list=[appeal_user_request.user_status],  # type: ignore
             db_session=db,
         )
         if not restrict_ban_entry:
@@ -1668,6 +1707,21 @@ def appeal_content(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Appeal user restrict/ban entry not found",
             )
+
+        # check if any previous rejected appeal for account appealed here associated with same report
+        previous_rejected_appeal = admin_service.get_a_appeal_report_id_content_id(
+            report_id=restrict_ban_entry.report_id,
+            content_id=appeal_user_request.content_id,
+            content_type=appeal_user_request.content_type,
+            status="REJ",
+            db_session=db,
+        )
+        if previous_rejected_appeal:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Request to appeal this account has been denied. Further appeals are not permitted after a previous rejection",
+            )
+
     # if post/comment
     else:
         appeal_user = user_service.get_user_by_username_email(
@@ -1681,6 +1735,8 @@ def appeal_content(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Appeal user not found"
             )
 
+        banned_post = None
+        banned_comment = None
         # check if the post/comment is really banned/deleted or not
         if appeal_user_request.content_type == "post":
             banned_post = post_service.get_a_post(
@@ -1705,28 +1761,77 @@ def appeal_content(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Appealed comment not banned",
                 )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid content type"
+            )
+
+        banned_content = banned_post or banned_comment
+        # check if post/content is_deleted is True after BAN (21 days appeal limit is crossed)
+        if banned_content and banned_content.is_deleted:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"This {appeal_user_request.content_type} is permanently banned and cannot be appealed for review. This decision cannot be reversed because 30 days have passed since your {appeal_user_request.content_type} was banned.",
+            )
 
         # get the report entry
-        report_entry = admin_service.get_a_report_by_content_id_user_id(
-            user_id=str(appeal_user.id),
-            content_id=str(appeal_user_request.content_id),
+        report_entry = admin_service.get_a_latest_report_by_content_id_user_id(
+            user_id=appeal_user.id,
+            content_id=appeal_user_request.content_id,  # type: ignore
+            content_type=appeal_user_request.content_type,
             status="RSD",
             db_session=db,
         )
+
         if not report_entry:
+            # check the content in account_report_flagged_content table and get the entry
+            flagged_content_entry = admin_service.get_account_report_flagged_content_entry_valid_flagged_content_id(
+                content_id=appeal_user_request.content_id, db_session=db  # type: ignore
+            )
+            if not flagged_content_entry:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Report associated with appeal content not found",
+                )
+
+            # check if the report associated with the flagged content is RSD or not
+            resolved_flagged_content_entry = (
+                admin_service.get_a_report_by_report_id_query(
+                    report_id=flagged_content_entry.report_id,
+                    status="RSD",
+                    db_session=db,
+                ).first()
+            )
+            if not resolved_flagged_content_entry:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Report associated with appeal content not found",
+                )
+
+            report_entry = resolved_flagged_content_entry
+
+        # # check if 30 day limit has passed after report RSD (content banned)
+        # if func.now() >= (report_entry.updated_at + timedelta(days=30)):
+        #     raise HTTPException(
+        #         status_code=status.HTTP_409_CONFLICT,
+        #         detail=f"This {report_entry.reported_item_type} is permanently banned and cannot be appealed for review. This decision cannot be reversed because 30 days have passed since your {report_entry.reported_item_type} was banned.",
+        #     )
+
+        # check if any previous rejected appeal for post/comment appealed here associated with same report
+        previous_rejected_appeal = admin_service.get_a_appeal_report_id_content_id(
+            report_id=None,
+            content_id=appeal_user_request.content_id,  # type: ignore
+            content_type=appeal_user_request.content_type,
+            status="REJ",
+            db_session=db,
+        )
+        if previous_rejected_appeal:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Appeal content report entry not found",
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Request to appeal this {appeal_user_request.content_type} has been denied. Further appeals are not permitted after a previous rejection",
             )
 
-        # check if 30 day limit has passed after report RSD (content banned)
-        if func.now() >= (report_entry.updated_at + timedelta(days=30)):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"This {report_entry.reported_item_type} is permanently banned and cannot be appealed for review. This decision cannot be reversed because 30 days have passed since your {report_entry.reported_item_type} was banned.",
-            )
-
-    ban_report_id = restrict_ban_entry or report_entry  # type: ignore
+    ban_report_id = restrict_ban_entry or report_entry
     if restrict_ban_entry:
         ban_report_id = restrict_ban_entry.report_id
     elif report_entry:
@@ -1827,3 +1932,36 @@ def appeal_content(
     return {
         "message": f"Your appeal for {appeal_user_request.content_type} {'@'+ appeal_user.username if appeal_user_request.content_type == 'account' else appeal_user_request.content_id} has been submitted successfully and will be handled by content moderator."
     }
+
+
+# @router.post("/send_ban_mail")
+# def send_mail(
+#     email_parameters: admin_schema.SendEmail,
+#     background_tasks: BackgroundTasks,
+# ):
+#     # generate appeal link
+#     appeal_link = "https://vpkonnect.in/accounts/appeals/form_ban"
+
+#     email_subject = "VPKonnect - Account Ban"
+#     email_details = admin_schema.SendEmail(
+#         template=(
+#             "permanent_ban_email.html"
+#             if consecutive_violation.status == "PBN"
+#             else "temporary_ban_email.html"
+#         ),
+#         email=[EmailStr(user.email)],
+#         body_info={
+#             "username": user.username,
+#             "link": appeal_link,
+#             "days": consecutive_violation.duration // 24,
+#             "ban_enforced_datetime": consecutive_violation.enforce_action_at.strftime(
+#                 "%b %d, %Y %H:%M %Z"
+#             ),
+#         },
+#     )
+
+#     email_utils.send_email(
+#         email_subject=email_subject,
+#         email_details=email_details,
+#         bg_tasks=background_tasks,
+#     )

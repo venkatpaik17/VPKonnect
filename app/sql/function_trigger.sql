@@ -576,3 +576,53 @@ AFTER UPDATE on "user_content_restrict_ban_appeal_detail"
 FOR EACH ROW
 WHEN (OLD.status = 'URV' AND NEW.status = 'CSD')
 EXECUTE FUNCTION insert_appeal_event_timeline('CLS');
+
+
+/*Function and trigger to manage user_account_history*/
+CREATE OR REPLACE FUNCTION update_user_account_history()
+RETURNS TRIGGER AS $$
+DECLARE
+    attr TEXT;
+    detail_type TEXT;
+    event_type TEXT;
+BEGIN
+    IF TG_NARGS <> 1 THEN
+        RAISE EXCEPTION 'Wrong number of arguments for update_user_account_history()';
+    END IF;
+    
+    attr := TG_ARGV[0];
+    
+    IF attr = 'status' THEN
+        IF (OLD.status = 'INA' AND NEW.status = 'ACT') AND (OLD.is_verified = False AND NEW.is_verified = True) THEN
+            event_type := 'CRT';
+        ELSIF OLD.status IN ('ACT', 'RSP', 'RSF') AND NEW.status IN ('DAH', 'DAK') THEN
+            event_type := 'DAV';
+        ELSIF OLD.status IN ('ACT', 'RSP', 'RSF') AND NEW.status IN ('PDH', 'PDK') THEN
+            event_type := 'DDS';
+        ELSIF OLD.status = 'INA' AND NEW.status = 'PDI' THEN
+            event_type := 'IDS';
+        ELSIF OLD.status = 'PBN' AND NEW.status = 'PDB' THEN
+            event_type := 'BDS';
+        ELSIF OLD.status IN ('PDH', 'PDK', 'PDI', 'PDB') AND NEW.status = 'DEL' THEN
+            event_type := 'DEL';
+        ELSIF OLD.status IN ('INA', 'DAH', 'DAK') AND NEW.status = 'ACT' THEN
+            event_type := 'RST';
+        END IF;
+        detail_type := 'Account';
+    END IF;
+
+    IF event_type IS NOT NULL THEN
+        INSERT INTO "user_account_history" (account_detail_type, event_type, user_id) 
+        VALUES (detail_type, event_type, OLD.id);
+    END IF;
+
+    RETURN NEW;
+
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE TRIGGER update_user_account_history_user_register_trigger
+AFTER UPDATE OF status ON "user"
+FOR EACH ROW
+EXECUTE FUNCTION update_user_account_history('status');
