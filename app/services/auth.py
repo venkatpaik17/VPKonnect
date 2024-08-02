@@ -26,6 +26,7 @@ def get_all_user_auth_track_entry_by_user_id_device_info(
             auth_model.UserAuthTrack.user_id == user_id,
             auth_model.UserAuthTrack.device_info == device_info,
             auth_model.UserAuthTrack.status == status,
+            auth_model.UserAuthTrack.is_deleted == False,
         )
         .first()
     )
@@ -38,6 +39,7 @@ def get_auth_track_entry_by_token_id_query(
     return db_session.query(auth_model.UserAuthTrack).filter(
         auth_model.UserAuthTrack.refresh_token_id == token_id,
         auth_model.UserAuthTrack.status == status,
+        auth_model.UserAuthTrack.is_deleted == False,
     )
 
 
@@ -49,6 +51,7 @@ def get_all_user_auth_track_entries_by_user_id(
         .filter(
             auth_model.UserAuthTrack.user_id == user_id,
             auth_model.UserAuthTrack.status == status,
+            auth_model.UserAuthTrack.is_deleted == False,
         )
         .all()
     )
@@ -71,6 +74,7 @@ def get_employee_auth_track_entry_by_token_id_query(
     return db_session.query(auth_model.EmployeeAuthTrack).filter(
         auth_model.EmployeeAuthTrack.refresh_token_id == token_id,
         auth_model.EmployeeAuthTrack.status == status,
+        auth_model.EmployeeAuthTrack.is_deleted == False,
     )
 
 
@@ -91,6 +95,7 @@ def get_all_employee_auth_track_entries_by_employee_id(
         .filter(
             auth_model.EmployeeAuthTrack.employee_id == employee_id,
             auth_model.EmployeeAuthTrack.status == status,
+            auth_model.EmployeeAuthTrack.is_deleted == False,
         )
         .all()
     )
@@ -126,6 +131,7 @@ def user_auth_track_user_inactivity_delete(db_session: Session):
         .filter(
             user_model.User.status.in_(["INA"]),
             user_model.User.is_deleted == False,
+            user_model.User.is_verified == True,
             auth_model.UserAuthTrack.status.in_(["ACT", "INV"]),
             func.now()
             >= (
@@ -133,6 +139,7 @@ def user_auth_track_user_inactivity_delete(db_session: Session):
                 + (user_model.User.inactive_delete_after * timedelta(days=1))
                 + timedelta(minutes=settings.refresh_token_expire_minutes)
             ),
+            auth_model.UserAuthTrack.is_deleted == False,
         )
         .all()
     )
@@ -169,6 +176,7 @@ def user_auth_track_user_inactivity_inactive(db_session: Session):
                 + timedelta(days=91)
                 + timedelta(minutes=settings.refresh_token_expire_minutes)
             ),
+            auth_model.UserAuthTrack.is_deleted == False,
         )
         .all()
     )

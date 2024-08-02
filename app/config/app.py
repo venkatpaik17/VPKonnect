@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 
 from pydantic import AnyHttpUrl, validator
@@ -35,6 +36,9 @@ class AppSettings(BaseAppSettings):
     reset_token_secret_key: str
     user_verify_token_secret_key: str
     user_verify_token_expire_minutes: int
+    image_max_size: int
+    ttlcache_max_size: int
+    image_folder: Path = Path("images")
 
     allowed_cors_origin: str | list[AnyHttpUrl]
 

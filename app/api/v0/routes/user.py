@@ -1,5 +1,5 @@
-import shutil
-from datetime import datetime, timedelta
+from datetime import timedelta
+from uuid import UUID, uuid4
 
 from fastapi import (
     APIRouter,
@@ -7,10 +7,10 @@ from fastapi import (
     Depends,
     Form,
     HTTPException,
+    Query,
     UploadFile,
     status,
 )
-from PIL import Image, UnidentifiedImageError
 from pydantic import EmailStr
 from pyfa_converter import FormDepends
 from sqlalchemy import desc, func
@@ -21,9 +21,12 @@ from app.config.app import settings
 from app.db.session import get_db
 from app.models import admin as admin_model
 from app.models import auth as auth_model
+from app.models import comment as comment_model
+from app.models import post as post_model
 from app.models import user as user_model
 from app.schemas import admin as admin_schema
 from app.schemas import auth as auth_schema
+from app.schemas import post as post_schema
 from app.schemas import user as user_schema
 from app.services import admin as admin_service
 from app.services import auth as auth_service
@@ -31,13 +34,16 @@ from app.services import comment as comment_service
 from app.services import post as post_service
 from app.services import user as user_service
 from app.utils import auth as auth_utils
+from app.utils import basic as basic_utils
 from app.utils import email as email_utils
 from app.utils import image as image_utils
 from app.utils import password as password_utils
 
 router = APIRouter(prefix=settings.api_prefix + "/users", tags=["Users"])
 
-MAX_SIZE = 5 * 1024 * 1024
+MAX_SIZE = settings.image_max_size
+
+image_folder = settings.image_folder
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -47,26 +53,26 @@ def create_user(
     db: Session = Depends(get_db),
     image: UploadFile | None = None,
 ):
+    print(request.account_visibility)
     # check if user registered but unverified
-    unverified_user_query = user_service.get_user_by_email_query(
-        request.email,
-        [
+    unverified_user = user_service.get_user_by_email(
+        email=request.email,
+        status_not_in_list=[
             "ACT",
             "DAH",
-            "DAK",
             "RSF",
             "RSP",
             "TBN",
             "PDH",
-            "PDK",
             "PBN",
+            "PDI",
+            "PDB",
             "DEL",
         ],
-        db,
+        db_session=db,
+        is_verified=False,
     )
-    unverified_user = unverified_user_query.filter(
-        user_model.User.is_verified == False
-    ).first()
+
     if unverified_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -81,128 +87,92 @@ def create_user(
 
     del request.confirm_password
 
-    username_check = user_service.check_username_exists(request.username, db)
+    username_check = user_service.check_username_exists(
+        username=request.username, db_session=db
+    )
     if username_check:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Username {request.username} is already taken",
         )
-    user_check = user_service.check_user_exists(request.email, db)
+    user_check = user_service.check_user_exists(email=request.email, db_session=db)
     if user_check:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"{request.email} already exists in the system",
         )
 
-    hashed_password = password_utils.get_hash(request.password)
+    hashed_password = password_utils.get_hash(password=request.password)
     request.password = hashed_password
 
-    # image related code
-    # if there is image uploaded, create a subfolder for profile pics, if folder exists get it. Upload the image in this folder.
+    user_repr_id = uuid4()
+    # print(user_repr_id)
+
+    # create a subfolder for user specific uploads, if folder exists get it.
+    user_subfolder = image_utils.get_or_create_entity_image_subfolder(
+        entity="user", repr_id=str(user_repr_id)
+    )
+
+    # print(user_subfolder)
+
+    # create a subfolder for profile images, if folder exists get it.
+    profile_subfolder = image_utils.get_or_create_entity_profile_image_subfolder(
+        entity_subfolder=user_subfolder
+    )
+
+    # create a subfolder for profile images, if folder exists get it.
+    posts_subfolder = image_utils.get_or_create_user_posts_image_subfolder(
+        user_subfolder=user_subfolder
+    )
+
+    add_user = user_model.User(**request.dict(), repr_id=user_repr_id)
+
+    image_path = None
     if image:
-        # handling image validatity and unsupported types
-        try:
-            # we try to open the image, raises UnidentifiedImageError when image doesn't open
-            with Image.open(image.file) as img:
-                # verifies the image for any tampering/corruption, raises exception if verification fails
-                img.verify()
+        # image validation and handling
+        image_name, image_path = image_utils.handle_image_operations(
+            username=request.username, target_folder=profile_subfolder, image=image
+        )
 
-            # move file pointer to the beginning of the file
-            image.file.seek(0)
+        add_user = user_model.User(
+            **request.dict(), repr_id=user_repr_id, profile_picture=image_name
+        )
 
-            # read the image file and check file size
-            # img_read = image.file.read()
-            # print(len(img_read))
-
-            # Move to the end of the file, get image size, no need to read the file
-            image.file.seek(0, 2)
-            image_size = image.file.tell()
-
-            # move file pointer to the beginning of the file
-            image.file.seek(0)
-            print(image_size)
-
-            # if len(img_read) > MAX_SIZE: if image is read, we need to get the size using len()
-            if image_size > MAX_SIZE:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Image too large, you can upload upto 5 MiB",
-                )
-        except UnidentifiedImageError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid image format"
-            ) from exc
-        except HTTPException as exc:
-            raise exc
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Error processing image"
-            ) from exc
-
-        # db transaction, we flush the user with customized image filename and use user repr id as name for user subfolder
-        # If everything goes right then only we commit. Any exceptions, rollback.
-        try:
-            upload_datetime = datetime.now().strftime("%Y%m%d%H%M%S")
-            image_name = f"{request.username}_{upload_datetime}_{image.filename}"
-
-            add_user = user_model.User(**request.dict(), profile_picture=image_name)
-            db.add(add_user)
-            db.flush()
-
-            # create a subfolder for user specific uploads, if folder exists get it.
-            user_subfolder = image_utils.get_or_create_entity_image_subfolder(
-                "user", str(add_user.repr_id)
-            )
-
-            # create a subfolder for profile images, if folder exists get it.
-            profile_subfolder = (
-                image_utils.get_or_create_entity_profile_image_subfolder(user_subfolder)
-            )
-
-            image_path = profile_subfolder / image_name
-
-            with open(image_path, "wb+") as f:
-                shutil.copyfileobj(image.file, f)
-
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error registering user",
-            ) from exc
-
-    else:
-        add_user = user_model.User(**request.dict())
+    try:
         db.add(add_user)
         db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(exc)
+        if image and image_path:
+            image_utils.remove_image(path=image_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error registering user",
+        ) from exc
 
-        # store image directly in the DB
-        # add_user = user_model.User(**request.dict(), profile_picture=image.file.read())
+    # store image directly in the DB
+    # add_user = user_model.User(**request.dict(), profile_picture=image.file.read())
 
-        db.refresh(add_user)
+    db.refresh(add_user)
 
     # generate a token
     claims = {"sub": add_user.email, "role": add_user.type}
     user_verify_token, user_verify_token_id = auth_utils.create_user_verify_token(
-        claims
+        claims=claims
     )
 
     # generate verification link
     verify_link = (
         f"https://vpkonnect.in/accounts/signup/verify/?token={user_verify_token}"
     )
-
+    email_subject = "VPKonnect - User Verification - Account Signup"
+    email_details = admin_schema.SendEmail(
+        template="user_account_signup_verification.html",
+        email=[EmailStr(add_user.email)],
+        body_info={"first_name": add_user.first_name, "link": verify_link},
+    )
     try:
-        email_subject = "VPKonnect - User Verification - Account Signup"
-        email_details = admin_schema.SendEmail(
-            template="user_account_signup_verification.html",
-            email=[EmailStr(add_user.email)],
-            body_info={"first_name": add_user.first_name, "link": verify_link},
-        )
-        # send email
-        email_utils.send_email(email_subject, email_details, background_tasks)
-
         # add the token to userverificationcodetoken table
         add_user_verify_token = auth_model.UserVerificationCodeToken(
             code_token_id=user_verify_token_id,
@@ -212,11 +182,14 @@ def create_user(
         db.add(add_user_verify_token)
         db.commit()
 
+        # send email
+        email_utils.send_email(email_subject, email_details, background_tasks)
+
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing verification email request",
+            detail="Error processing verification email request for user registration",
         ) from exc
     except Exception as exc:
         raise HTTPException(
@@ -236,33 +209,44 @@ def send_verification_email_user(
     db: Session = Depends(get_db),
 ):
     # get the user
-    user = user_service.get_user_by_email(email_user_request.email, ["DEL"], db)
+    user = user_service.get_user_by_email(
+        email=email_user_request.email,
+        status_not_in_list=["PDI", "PDB", "DEL"],
+        db_session=db,
+        is_verified=None,
+    )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
+    email_subject = str()
+    email_details = None
+    token_id = str()
+    return_message = None
     # check the type and accordingly set parameters
     if email_user_request.type == "USV":
-        if user.status in [
-            "ACT",
-            "DAH",
-            "DAK",
-            "RSF",
-            "RSP",
-            "TBN",
-            "PDH",
-            "PDK",
-            "PBN",
-        ]:
+        if (
+            user.status
+            in [
+                "ACT",
+                "DAH",
+                "RSF",
+                "RSP",
+                "TBN",
+                "PDH",
+                "PBN",
+            ]
+            or user.is_verified == True
+        ):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Unable to process your request at this time.",
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User is already verified",
             )
 
         # generate a token
         claims = {"sub": user.email, "role": user.type}
-        user_token, token_id = auth_utils.create_user_verify_token(claims)
+        user_token, token_id = auth_utils.create_user_verify_token(claims=claims)
 
         # generate verification link
         verify_link = f"https://vpkonnect.in/accounts/signup/verify/?token={user_token}"
@@ -289,7 +273,7 @@ def send_verification_email_user(
 
         # generate token
         claims = {"sub": user.email, "role": user.type}
-        user_token, token_id = auth_utils.create_reset_token(claims)
+        user_token, token_id = auth_utils.create_reset_token(claims=claims)
 
         # generate reset link
         reset_link = (
@@ -305,7 +289,6 @@ def send_verification_email_user(
         return_message = f"An email will be sent to {user.email} if an account is registered under it."
 
     try:
-        email_utils.send_email(email_subject, email_details, background_tasks)
         # add the token to userverificationcodetoken table
         add_user_token = auth_model.UserVerificationCodeToken(
             code_token_id=token_id,
@@ -314,6 +297,8 @@ def send_verification_email_user(
         )
         db.add(add_user_token)
         db.commit()
+
+        email_utils.send_email(email_subject, email_details, background_tasks)
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(
@@ -332,9 +317,9 @@ def send_verification_email_user(
 @router.post("/register/verify", response_model=user_schema.UserVerifyResponse)
 def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db)):
     # decode token
-    token_claims = auth_utils.verify_user_verify_token(user_verify_token)
+    token_claims = auth_utils.verify_user_verify_token(token=user_verify_token)
     user_verify_token_blacklist_check = auth_utils.is_token_blacklisted(
-        token_claims.token_id
+        token=token_claims.token_id
     )
     if user_verify_token_blacklist_check:
         raise HTTPException(
@@ -344,31 +329,32 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
 
     # get the user
     user_query = user_service.get_user_by_email_query(
-        token_claims.email,
-        [
+        email=token_claims.email,
+        status_not_in_list=[
             "ACT",
             "DAH",
-            "DAK",
             "RSF",
             "RSP",
             "TBN",
             "PDH",
-            "PDK",
             "PBN",
             "DEL",
+            "PDI",
+            "PDB",
         ],
-        db,
+        db_session=db,
+        is_verified=False,
     )
     user = user_query.first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="New user to be registered not found",
+            detail="New user to be verfified and registered not found",
         )
 
     # get the query to fetch all user verify token ids related to the user
     user_verify_token_ids_query = auth_service.get_user_verification_codes_tokens_query(
-        str(user.id), "USV", db
+        user_id=str(user.id), _type="USV", db_session=db
     )
 
     # check if token id of token got from request exists
@@ -397,7 +383,7 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
         ]
 
         for token_id in user_verify_token_ids:
-            auth_utils.blacklist_token(token_id)
+            auth_utils.blacklist_token(token=token_id)
 
         # update is_verified to True, status to ACT in user
         user_query.update(
@@ -437,16 +423,15 @@ def reset_password(
 ):
     reset_user = user_schema.UserPasswordReset(email=user_email)
     # check if user is valid using email
-    user = user_service.get_user_by_email(reset_user.email, ["DEL"], db)
+    user = user_service.get_user_by_email(
+        email=reset_user.email, status_not_in_list=["PDI", "PDB", "DEL"], db_session=db
+    )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    if user.status in [
-        "TBN",
-        "PBN",
-    ]:
+    if user.status in ("TBN", "PBN"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Unable to process your request at this time. Please contact support for assistance.",
@@ -454,7 +439,7 @@ def reset_password(
 
     # generate a token
     claims = {"sub": user.email, "role": user.type}
-    reset_token, reset_token_id = auth_utils.create_reset_token(claims)
+    reset_token, reset_token_id = auth_utils.create_reset_token(claims=claims)
 
     # generate reset link
     reset_link = f"https://vpkonnect.in/accounts/password/change/?token={reset_token}"
@@ -462,19 +447,11 @@ def reset_password(
     email_subject = "VPKonnect - Password Reset Request"
 
     # send mail with reset link if user is valid, we will using mailtrap dummy server for testing
-    try:
-        email_details = admin_schema.SendEmail(
-            template="password_reset_email.html",
-            email=[reset_user.email],
-            body_info={"username": user.username, "link": reset_link},
-        )
-        email_utils.send_email(email_subject, email_details, background_tasks)
-    except Exception as exc:
-        auth_utils.blacklist_token(reset_token)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="There was an error in sending email",
-        ) from exc
+    email_details = admin_schema.SendEmail(
+        template="password_reset_email.html",
+        email=[reset_user.email],
+        body_info={"username": user.username, "link": reset_link},
+    )
 
     # add the token id to user password reset token table
     add_reset_token_id = auth_model.UserVerificationCodeToken(
@@ -482,8 +459,24 @@ def reset_password(
         type="PWR",
         user_id=user.id,
     )
-    db.add(add_reset_token_id)
-    db.commit()
+
+    try:
+        db.add(add_reset_token_id)
+        db.commit()
+
+        email_utils.send_email(email_subject, email_details, background_tasks)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing reset password request",
+        ) from exc
+    except Exception as exc:
+        auth_utils.blacklist_token(reset_token)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="There was an error in sending email",
+        ) from exc
 
     return {
         "message": f"An email will be sent to {reset_user.email} if an account is registered under it."
@@ -512,10 +505,12 @@ def change_password_reset(
     del confirm_password
 
     # get the token, decode it, verify it
-    token_claims = auth_utils.verify_reset_token(reset.reset_token)
+    token_claims = auth_utils.verify_reset_token(token=reset.reset_token)
 
     # check token blacklist
-    reset_token_blacklist_check = auth_utils.is_token_blacklisted(token_claims.token_id)
+    reset_token_blacklist_check = auth_utils.is_token_blacklisted(
+        token=token_claims.token_id
+    )
     if reset_token_blacklist_check:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -523,17 +518,18 @@ def change_password_reset(
         )
 
     # get the user
-    user_query = user_service.get_user_by_email_query(token_claims.email, ["DEL"], db)
+    user_query = user_service.get_user_by_email_query(
+        email=token_claims.email,
+        status_not_in_list=["PDB", "PDI", "DEL"],
+        db_session=db,
+    )
     user = user_query.first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    if user.status in [
-        "TBN",
-        "PBN",
-    ]:
+    if user.status in ("TBN", "PBN"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Unable to process your request at this time. Please contact support for assistance.",
@@ -542,9 +538,7 @@ def change_password_reset(
     # get query to fetch all reset token ids related to the user
     user_password_reset_tokens_query = (
         auth_service.get_user_verification_codes_tokens_query(
-            str(user.id),
-            "PWR",
-            db,
+            user_id=str(user.id), _type="PWR", db_session=db
         )
     )
 
@@ -562,35 +556,6 @@ def change_password_reset(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Password reset failed, Reset token not found",
         )
-    try:
-        # update is_deleted to True for all reset tokens and blacklist all token ids
-        user_password_reset_tokens_query.update(
-            {"is_deleted": True}, synchronize_session=False
-        )
-        reset_token_ids = [
-            item.reset_token_id for item in user_password_reset_tokens_query.all()
-        ]
-        for token_id in reset_token_ids:
-            auth_utils.blacklist_token(token_id)
-
-        # hash the new password and update the password field in user table
-        hashed_password = password_utils.get_hash(reset.password)
-        user_query.update({"password": hashed_password}, synchronize_session=False)
-
-        # add an entry to password change history table
-        add_password_change_history_entry = user_model.PasswordChangeHistory(
-            user_id=user.id
-        )
-        db.add(add_password_change_history_entry)
-
-        db.commit()
-
-    except SQLAlchemyError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing change password request",
-        ) from exc
 
     # send mail to inform password reset
     email_subject = "VPKonnect - Password Reset Notification"
@@ -604,7 +569,35 @@ def change_password_reset(
     )
 
     try:
+        # update is_deleted to True for all reset tokens and blacklist all token ids
+        user_password_reset_tokens_query.update(
+            {"is_deleted": True}, synchronize_session=False
+        )
+        reset_token_ids = [
+            item.reset_token_id for item in user_password_reset_tokens_query.all()
+        ]
+        for token_id in reset_token_ids:
+            auth_utils.blacklist_token(token=token_id)
+
+        # hash the new password and update the password field in user table
+        hashed_password = password_utils.get_hash(password=reset.password)
+        user_query.update({"password": hashed_password}, synchronize_session=False)
+
+        # add an entry to password change history table
+        add_password_change_history_entry = user_model.PasswordChangeHistory(
+            user_id=user.id
+        )
+        db.add(add_password_change_history_entry)
+        db.commit()
+
         email_utils.send_email(email_subject, email_details, background_tasks)
+
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing change password request",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -614,16 +607,15 @@ def change_password_reset(
     return {"message": "Password change successful"}
 
 
-@router.post("/{username}/password/change")
+@router.post("/password/update")
 def change_password_update(
-    username: str,
     background_tasks: BackgroundTasks,
     old_password: str = Form(),
     new_password: str = Form(),
     confirm_new_password: str = Form(),
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
 ):
     update = user_schema.UserPasswordChangeUpdate(
@@ -632,40 +624,14 @@ def change_password_update(
         confirm_new_password=confirm_new_password,
     )
 
-    # get the user using username
-    user_query = user_service.get_user_by_username_query(username, ["DEL"], db)
+    # get current user
+    curr_auth_user_query = user_service.get_user_by_email_query(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
+    )
 
-    user = user_query.first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-
-    if user.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found"
-        )
-
-    if user.status in [
-        "TBN",
-        "PBN",
-    ]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Unable to process your request at this time. Please contact support for assistance.",
-        )
-
-    # check user identity
-    if current_user.email != user.email:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to perform requested action",
-        )
+    curr_auth_user = curr_auth_user_query.first()
 
     # check both old password and new password
     if update.old_password == update.new_password:
@@ -676,7 +642,7 @@ def change_password_update(
 
     # check old password
     old_password_check = password_utils.verify_password(
-        update.old_password, user.password
+        entered_password=update.old_password, hashed_password=curr_auth_user.password
     )
     if not old_password_check:
         raise HTTPException(
@@ -691,46 +657,45 @@ def change_password_update(
 
     del confirm_new_password
 
+    # send mail to inform password change
+    email_subject = "VPKonnect - Password Change Notification"
+    email_details = admin_schema.SendEmail(
+        template="password_reset_change_notification.html",
+        email=[EmailStr(curr_auth_user.email)],
+        body_info={
+            "username": curr_auth_user.username,
+            "action": "updated",
+        },
+    )
+
     try:
         # hash the new password and update the password field in user table
-        hashed_password = password_utils.get_hash(update.new_password)
-        user_query.update({"password": hashed_password}, synchronize_session=False)
+        hashed_password = password_utils.get_hash(password=update.new_password)
+        curr_auth_user_query.update(
+            {"password": hashed_password}, synchronize_session=False
+        )
 
         # add an entry to password change history table
         add_password_change_history_entry = user_model.PasswordChangeHistory(
-            user_id=user.id
+            user_id=curr_auth_user.id
         )
         db.add(add_password_change_history_entry)
-
         db.commit()
 
+        email_utils.send_email(email_subject, email_details, background_tasks)
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing change password request",
         ) from exc
-
-    # send mail to inform password change
-    email_subject = "VPKonnect - Password Change Notification"
-    email_details = admin_schema.SendEmail(
-        template="password_reset_change_notification.html",
-        email=[EmailStr(user.email)],
-        body_info={
-            "username": user.username,
-            "action": "changed",
-        },
-    )
-
-    try:
-        email_utils.send_email(email_subject, email_details, background_tasks)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error sending email.",
         ) from exc
 
-    return {"message": "Password change successful"}
+    return {"user": curr_auth_user.username, "message": f"Password change successful"}
 
 
 # follow/unfollow users
@@ -739,14 +704,14 @@ def follow_user(
     followed_user: user_schema.UserFollow,
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
 ):
     # get the user to be followed
     user_followed = user_service.get_user_by_username(
-        followed_user.username,
-        ["PBN", "DEL"],
-        db,
+        username=followed_user.username,
+        status_not_in_list=["PDI", "PDB", "DEL"],
+        db_session=db,
     )
     if not user_followed:
         raise HTTPException(
@@ -754,23 +719,31 @@ def follow_user(
             detail="User to be followed not found",
         )
 
-    if user_followed.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
+    if user_followed.status in ("DAH", "PDH"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile to be followed not found",
         )
 
+    if user_followed.status == "PBN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User to be followed is banned, cannot access profile",
+        )
+
     # get follower user
     follower_user = user_service.get_user_by_email(
-        current_user.email,
-        ["PBN", "DEL"],
-        db,
+        email=current_user.email,
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
     )
+
+    # RSF cannot follow
+    if follower_user.status == "RSF":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot follow/unfollow other user, user is under full restriction",
+        )
 
     # user cannot follow/unfollow him/herself
     if followed_user.username == follower_user.username:
@@ -785,85 +758,91 @@ def follow_user(
         for follower_association in user_followed.followers
     ]
 
-    # follow a user
-    if followed_user.action == "follow":
-        # check if already follows the user
-        if follower_user.username in following_usernames:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"You already are following {user_followed.username}",
-            )
-
-        # if user is private then send request orelse follow directly
-        if user_followed.account_visibility == "PRV":  # type: ignore
-            # check if follow request already sent
-            check_request_sent = user_service.get_user_follow_association_entry_query(
-                str(follower_user.id),
-                str(user_followed.id),
-                "PND",
-                db,
-            )
-            if check_request_sent.first():
+    message = None
+    try:
+        # follow a user
+        if followed_user.action == "follow":
+            # check if already follows the user
+            if follower_user.username in following_usernames:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Follow request is already sent",
+                    detail=f"You already are following {user_followed.username}",
                 )
 
-            follow_request = user_model.UserFollowAssociation(
-                status="PND",
-                follower=follower_user,
-                followed=user_followed,
-            )
-            db.add(follow_request)
-            db.commit()
+            # if user is private then send request orelse follow directly
+            if user_followed.account_visibility == "PRV":  # type: ignore
+                # check if follow request already sent
+                check_request_sent = (
+                    user_service.get_user_follow_association_entry_query(
+                        follower_id=str(follower_user.id),
+                        followed_id=str(user_followed.id),
+                        status="PND",
+                        db_session=db,
+                    )
+                )
+                if check_request_sent.first():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Follow request is already sent",
+                    )
 
-            return {"message": f"Follow request sent to {followed_user.username}"}
-        else:
-            follow = user_model.UserFollowAssociation(
+                follow_request = user_model.UserFollowAssociation(
+                    status="PND",
+                    follower=follower_user,
+                    followed=user_followed,
+                )
+                db.add(follow_request)
+
+                message = f"Follow request sent to {followed_user.username}"
+            else:
+                follow = user_model.UserFollowAssociation(
+                    status="ACP",
+                    follower=follower_user,
+                    followed=user_followed,
+                )
+                db.add(follow)
+
+                message = f"Following {followed_user.username}"
+
+        # unfollow a user
+        elif followed_user.action == "unfollow":
+            # check if follows the user
+            if follower_user.username not in following_usernames:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"You are not following {user_followed.username}",
+                )
+            # get user follow entry query
+            user_follow_query = user_service.get_user_follow_association_entry_query(
+                follower_id=str(follower_user.id),
+                followed_id=str(user_followed.id),
                 status="ACP",
-                follower=follower_user,
-                followed=user_followed,
+                db_session=db,
             )
-            db.add(follow)
-            db.commit()
+            if not user_follow_query.first():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User follow entry not found",
+                )
 
-            print(user_followed.followers)
-            return {"message": f"Following {followed_user.username}"}
-
-    # unfollow a user
-    elif followed_user.action == "unfollow":
-        # check if follows the user
-        if follower_user.username not in following_usernames:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"You are not following {user_followed.username}",
-            )
-        # get user follow entry query
-        user_follow_query = user_service.get_user_follow_association_entry_query(
-            str(follower_user.id),
-            str(user_followed.id),
-            "ACP",
-            db,
-        )
-        if not user_follow_query.first():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User follow entry not found",
+            # update the status to unfollowed
+            user_follow_query.update(
+                {"status": "UNF"},
+                synchronize_session=False,
             )
 
-        # update the status to unfollowed
-        user_follow_query.update(
-            {"status": "UNF"},
-            synchronize_session=False,
-        )
+            print(following_usernames)
+            message = f"Unfollowed {followed_user.username}"
+
         db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing follow/unfollow user request",
+        ) from exc
 
-        following_usernames = [
-            follower_association.follower.username
-            for follower_association in user_followed.followers
-        ]
-        print(following_usernames)
-        return {"message": f"Unfollowed {followed_user.username}"}
+    return message
 
 
 # accept/reject follow request
@@ -873,76 +852,86 @@ def manage_follow_request(
     follow_request: user_schema.UserFollowRequest,
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
 ):
     # check for user using username
     follower_user = user_service.get_user_by_username(
-        username,
-        ["PBN", "DEL"],
-        db,
+        username=username,
+        status_not_in_list=["PDI", "PDB", "DEL"],
+        db_session=db,
     )
     if not follower_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Follower user not found"
         )
-    if follower_user.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
+    if follower_user.status in ("DAH", "PDH"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Follower user profile not found",
         )
+    if follower_user.status == "PBN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Follower user is banned, cannot access profile",
+        )
 
     # get current user object
     user = user_service.get_user_by_email(
-        current_user.email,
-        ["PBN", "DEL"],
-        db,
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
     )
 
     # check for user follow entry with status pending
     user_follow_query = user_service.get_user_follow_association_entry_query(
-        str(follower_user.id),
-        str(user.id),
-        "PND",
-        db,
+        follower_id=str(follower_user.id),
+        followed_id=str(user.id),
+        status="PND",
+        db_session=db,
     )
     if not user_follow_query.first():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User follow entry not found"
         )
 
-    # accept the follow request
-    if follow_request.action == "accept":
-        user_follow_query.update(
-            {
-                "status": "ACP",
-                "follower_user_id": follower_user.id,
-                "followed_user_id": user.id,
-            },
-            synchronize_session=False,
-        )
+    message = None
+    try:
+        # accept the follow request
+        if follow_request.action == "accept":
+            user_follow_query.update(
+                {
+                    "status": "ACP",
+                    "follower_user_id": follower_user.id,
+                    "followed_user_id": user.id,
+                },
+                synchronize_session=False,
+            )
+
+            message = f"Following {user.username}"
+
+        # reject the follow request
+        elif follow_request.action == "reject":
+            user_follow_query.update(
+                {
+                    "status": "REJ",
+                    "follower_user_id": follower_user.id,
+                    "followed_user_id": user.id,
+                },
+                synchronize_session=False,
+            )
+
+            message = f"Rejected the request to follow {user.username}"
+
         db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing accept/reject follow requests",
+        ) from exc
 
-        return {"message": f"Following {user.username}"}
-
-    # reject the follow request
-    elif follow_request.action == "reject":
-        user_follow_query.update(
-            {
-                "status": "REJ",
-                "follower_user_id": follower_user.id,
-                "followed_user_id": user.id,
-            },
-            synchronize_session=False,
-        )
-        db.commit()
-
-        return {"message": f"Rejected the request to follow {user.username}"}
+    return {"message": message}
 
 
 # get all followers/following of a user
@@ -955,42 +944,43 @@ def get_user_followers_following(
     request_info: user_schema.UserFollowersFollowing,
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
     # can't use Depends(auth_utils.check_access_role(role="user")) because Depends doesn't support extra params directly
     # hence we have a custom dependency class which will set the role param and call the get_current_user function
 ):
     # get user from username
     user = user_service.get_user_by_username(
-        username,
-        ["PBN", "DEL"],
-        db,
+        username=username,
+        status_not_in_list=["PDI", "PDB", "DEL"],
+        db_session=db,
     )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    if user.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
+    if user.status in ("DAH", "PDH"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile not found",
         )
 
+    if user.status == "PBN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is banned, cannot access profile",
+        )
+
     # get current user
     curr_auth_user = user_service.get_user_by_email(
-        str(current_user.email),
-        ["PBN", "DEL"],
-        db,
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
     )
 
     # get details only if owner or public account or follower
     follower_check = user_service.check_user_follower_or_not(
-        str(curr_auth_user.id), str(user.id), db
+        follower_id=str(curr_auth_user.id), followed_id=str(user.id), db_session=db
     )
 
     if (username != curr_auth_user.username) and (user.account_visibility == "PRV" and not follower_check):  # type: ignore
@@ -1006,14 +996,14 @@ def get_user_followers_following(
     # check the fetch
     followers_list = []
     following_list = []
-    curr_auth_user_following_usernames = [
+    curr_auth_user_following_usernames = (
         following_association.followed.username
         for following_association in curr_auth_user.following
-    ]
+    )
     if request_info.fetch == "followers":
-        user_followers = [
+        user_followers = (
             follower_association.follower for follower_association in user.followers
-        ]
+        )
         for follower in user_followers:
             if follower.username in curr_auth_user_following_usernames:
                 followers_list.append(
@@ -1044,9 +1034,9 @@ def get_user_followers_following(
         return followers_list
 
     elif request_info.fetch == "following":
-        user_following = [
+        user_following = (
             following_association.followed for following_association in user.following
-        ]
+        )
         for following in user_following:
             if following.username in curr_auth_user_following_usernames:
                 following_list.append(
@@ -1078,60 +1068,32 @@ def get_user_followers_following(
 
     else:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Error processing request"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Error processing request. Invalid fetch",
         )
 
 
-# get all follow requests of a user
+# get all follow requests of user
 @router.get(
-    "/{username}/follow/requests",
+    "/follow/requests",
     response_model=list[user_schema.UserGetFollowRequestsResponse],
 )
 def get_follow_requests(
-    username: str,
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
 ):
-    # get user from username
-    user = user_service.get_user_by_username(
-        username,
-        ["PBN", "DEL"],
-        db,
-    )
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-    if user.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found",
-        )
-
     # get current user
     curr_auth_user = user_service.get_user_by_email(
-        current_user.email,
-        ["PBN", "DEL"],
-        db,
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
     )
-
-    # check user identity
-    if username != curr_auth_user.username:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to perform requested action",
-        )
 
     # get all follow requests
     user_follow_requests_entries = user_service.get_user_follow_requests(
-        str(user.id), "PND", db
+        followed_id=str(curr_auth_user.id), status="PND", db_session=db
     )
 
     requests_user_ids = [
@@ -1144,11 +1106,14 @@ def get_follow_requests(
             user_model.User.status.in_(
                 [
                     "ACT",
+                    "INA",
                     "RSF",
                     "RSP",
                     "TBN",
                 ]
             ),
+            user_model.User.is_verified == True,
+            user_model.User.is_deleted == False,
         )
         .all()
     )
@@ -1160,63 +1125,45 @@ def get_follow_requests(
 @router.put("/follow/remove/{username}")
 def remove_follower(
     username: str,
-    user_request: user_schema.UserRemoveFollower,
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
 ):
     # get user from username
-    follower_user = user_service.get_user_by_username(username, ["PBN", "DEL"], db)
+    follower_user = user_service.get_user_by_username(
+        username=username, status_not_in_list=["PDI", "PDB", "DEL"], db_session=db
+    )
     if not follower_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Follower user not found"
         )
 
-    if follower_user.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
+    if follower_user.status in ("DAH", "PDH"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Follower user profile not found",
         )
 
-    # get request user
-    user = user_service.get_user_by_username(user_request.username, ["PBN", "DEL"], db)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-
-    if user.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found",
-        )
-
-    # get current user
-    curr_auth_user = user_service.get_user_by_email(
-        str(current_user.email), ["PBN", "DEL"], db
-    )
-
-    # check user identity
-    if user_request.username != curr_auth_user.username:
+    if follower_user.status == "PBN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to perform requested action",
+            detail="Follower user is banned, cannot access profile",
         )
+
+    # get curr user
+    curr_auth_user = user_service.get_user_by_email(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
+    )
 
     # get the user follow association entry
     user_follow_entry_query = user_service.get_user_follow_association_entry_query(
-        follower_user.id, curr_auth_user.id, "ACP", db
+        follower_id=follower_user.id,
+        followed_id=curr_auth_user.id,
+        status="ACP",
+        db_session=db,
     )
     user_follow_entry = user_follow_entry_query.first()
     if not user_follow_entry:
@@ -1224,16 +1171,24 @@ def remove_follower(
             status_code=status.HTTP_404_NOT_FOUND, detail="User follow entry not found"
         )
 
-    # update the follow entry status from ACP to RMV
-    user_follow_entry_query.update(
-        {
-            "status": "RMV",
-            "follower_user_id": user_follow_entry.follower_user_id,
-            "followed_user_id": user_follow_entry.followed_user_id,
-        },
-        synchronize_session=False,
-    )
-    db.commit()
+    try:
+        # update the follow entry status from ACP to RMV
+        user_follow_entry_query.update(
+            {
+                "status": "RMV",
+                "follower_user_id": user_follow_entry.follower_user_id,
+                "followed_user_id": user_follow_entry.followed_user_id,
+            },
+            synchronize_session=False,
+        )
+
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing remove follower request",
+        ) from exc
 
     return {
         "message": f"{follower_user.username} has been removed from your followers successfully"
@@ -1241,55 +1196,35 @@ def remove_follower(
 
 
 # update username
-@router.post("/{username}/username/change")
+@router.post("/username/change")
 def username_change(
-    username: str,
     new_username: str = Form(),
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
 ):
     update = user_schema.UserUsernameChange(new_username=new_username)
 
-    # get user from username
-    user_query = user_service.get_user_by_username_query(
-        username,
-        ["PBN", "DEL"],
-        db,
+    # get current user
+    curr_auth_user_query = user_service.get_user_by_email_query(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
     )
-    user = user_query.first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-    if user.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found",
-        )
-
-    # check user identity
-    if current_user.email != user.email:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to perform requested action",
-        )
+    curr_auth_user = curr_auth_user_query.first()
 
     # check if new username matches old username
-    if update.new_username == username:
+    if update.new_username == curr_auth_user.username:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="New username cannot be same as old username",
         )
 
     # check if new username already taken
-    username_exists = user_service.check_username_exists(update.new_username, db)
+    username_exists = user_service.check_username_exists(
+        username=update.new_username, db_session=db
+    )
     if username_exists:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1298,14 +1233,16 @@ def username_change(
 
     try:
         # update username
-        user_query.update({"username": update.new_username}, synchronize_session=False)
+        curr_auth_user_query.update(
+            {"username": update.new_username}, synchronize_session=False
+        )
 
         # add entry to username change history table
         add_username_change_history_entry = user_model.UsernameChangeHistory(
-            previous_username=username, user_id=user.id
+            previous_username=curr_auth_user.username, user_id=curr_auth_user.id
         )
-        db.add(add_username_change_history_entry)
 
+        db.add(add_username_change_history_entry)
         db.commit()
 
     except SQLAlchemyError as exc:
@@ -1318,19 +1255,271 @@ def username_change(
     return {"message": "Username change successful"}
 
 
-# deactivate/soft-delete the user account
-@router.patch("/{username}/{action}")
-def deactivate_or_soft_delete_user(
+# get user profile
+@router.get("/{username}/profile")
+def user_profile(
     username: str,
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role=["user"])
+    ),
+):
+    # get the user from username
+    user = user_service.get_user_by_username(
+        username=username,
+        status_not_in_list=["DEL", "PDB", "PDI"],
+        db_session=db,
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    elif user.status in ("DAH", "PDH"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found"
+        )
+    elif user.status == "PBN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is banned, cannot access profile",
+        )
+
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
+    )
+
+    # check whether current user follows user or not
+    follower_check = user_service.check_user_follower_or_not(
+        follower_id=str(curr_auth_user.id), followed_id=str(user.id), db_session=db
+    )
+
+    # show dp, username, no of posts, no of followers and following, followed_by, follows_user, message
+    # posts will be fetched by all posts api endpoint
+    # get no. of posts
+    no_of_posts = post_service.count_posts(user_id=user.id, status="PUB", db_session=db)
+    # get no of followers and following
+    no_of_followers = user_service.count_followers(
+        user_id=user.id, status="ACP", db_session=db
+    )
+    no_of_following = user_service.count_following(
+        user_id=user.id, status="ACP", db_session=db
+    )
+
+    # U1, U2, U3, U4, U5 are users
+    # get those users who are followed by U1 and follow U4
+    # U1 is following U2, U3, U5
+    # U2 and U3 are following U4
+    # output: U2 and U3
+    followed_by_objs = user_service.user_followed_by(
+        current_user_id=curr_auth_user.id, profile_user_id=user.id, db_session=db
+    )
+    followed_by = (
+        [followed_user.followed.username for followed_user in followed_by_objs]
+        if username != curr_auth_user.username
+        else None
+    )
+    # print(followed_by[0].__dict__ if followed_by else "0")
+    follows_user = True if follower_check else False
+
+    user_profile_details = user_schema.UserProfileResponse(
+        username=user.username,
+        profile_picture=user.profile_picture,
+        num_of_posts=no_of_posts,
+        num_of_followers=no_of_followers,
+        num_of_following=no_of_following,
+        followed_by=followed_by,
+        follows_user=follows_user if username != curr_auth_user.username else None,
+    )
+
+    return user_profile_details.dict(exclude_none=True)
+
+
+@router.get(
+    "/{username}/posts",
+)
+def get_all_user_posts(
+    username: str,
+    posts_request: user_schema.UserPostRequest,
+    limit: int = Query(1, le=12),
+    last_post_id: UUID = Query(None),
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.AccessRoleDependency(role=["user"])
+    ),
+):
+    # get the user from username
+    user = user_service.get_user_by_username(
+        username=username,
+        status_not_in_list=["DEL", "PDB", "PDI"],
+        db_session=db,
+    )
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    elif user.status in ("DAH", "PDH"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found"
+        )
+    elif user.status == "PBN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is banned, cannot access profile",
+        )
+
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
+    )
+
+    # check whether current user follows user or not
+    follower_check = user_service.check_user_follower_or_not(
+        follower_id=str(curr_auth_user.id), followed_id=str(user.id), db_session=db
+    )
+
+    if username != curr_auth_user.username:
+        if user.account_visibility == "PRV" and not follower_check:
+            return {"message": "This profile is private. Follow to see their posts."}
+
+        elif posts_request.post_status in ("DRF", "FLB", "BAN"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access requested resource",
+            )
+
+    # get the posts
+    all_posts = post_service.get_all_posts_profile(
+        profile_user_id=user.id,
+        status=posts_request.post_status,
+        limit=limit,
+        last_post_id=last_post_id,
+        db_session=db,
+    )
+
+    if not all_posts:
+        if last_post_id:
+            return {"message": "No more posts available"}
+
+        return {"message": "No posts yet"}
+
+    all_posts_response = [
+        post_schema.PostProfileResponse(
+            id=post.id,
+            image=post.image,
+            num_of_likes=(
+                post_service.count_post_likes(
+                    post_id=post.id, status="ACT", db_session=db
+                )
+                if post.status != "DRF"
+                else None
+            ),
+            num_of_comments=(
+                comment_service.count_comments(
+                    post_id=post.id, status_in_list=["PUB", "FLB"], db_session=db
+                )
+                if post.status != "DRF"
+                else None
+            ),
+        ).dict(exclude_none=True)
+        for post in all_posts
+    ]
+
+    return all_posts_response
+
+
+@router.get("/feed")
+@auth_utils.authorize(["user"])
+def user_feed(
+    db: Session = Depends(get_db),
+    last_seen_post_id: UUID = Query(None),
+    limit: int = Query(1, le=10),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
+    )
+
+    # get the user following ids
+    user_following_ids = user_service.get_user_following_ids(
+        user_id=curr_auth_user.id, db_session=db
+    )
+
+    if not user_following_ids:
+        return {"message": "Follow people to get their updates"}
+
+    # print(user_following_ids, type(user_following_ids))
+
+    # get all posts upto 3 days ago
+    user_feed_posts, next_cursor = post_service.get_all_posts_user_feed(
+        followed_user_id_list=user_following_ids,
+        last_seen_post_id=last_seen_post_id,
+        limit=limit,
+        db_session=db,
+    )
+
+    # print(user_feed_posts, next_cursor)
+
+    if not user_feed_posts:
+        return {"message": "You have completely caught up from the past 3 days"}
+
+    # print(user_feed_posts[0].post_user.__dict__)
+
+    user_feed_posts_response = [
+        post_schema.PostUserFeedResponse(
+            id=post.id,
+            image=post.image,
+            num_of_likes=post_service.count_post_likes(
+                post_id=post.id, status="ACT", db_session=db
+            ),
+            num_of_comments=comment_service.count_comments(
+                post_id=post.id, status_in_list=["PUB", "FLB"], db_session=db
+            ),
+            post_user=post.post_user,
+            caption=post.caption,
+            posted_time_ago=basic_utils.time_ago(post_datetime=post.created_at),
+            curr_user_like=post_service.user_like_exists(
+                user_id=curr_auth_user.id, post_id=post.id, db_session=db
+            )
+            is not None,  # OR any(like.post_like_user.username for like in post.likes)
+        )
+        for post in user_feed_posts
+    ]
+
+    user_feed_response = user_schema.UserFeedResponse(
+        posts=user_feed_posts_response, next_cursor=next_cursor
+    )
+
+    return user_feed_response
+
+
+# deactivate/soft-delete the user account
+@router.patch("/{action}")
+def deactivate_or_soft_delete_user(
     action: str,
     background_tasks: BackgroundTasks,
     password: str = Form(None),
-    hide_interactions: bool = Form(),
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
 ):
+    # get current user
+    curr_auth_user_query = user_service.get_user_by_email_query(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
+    )
+    curr_auth_user = curr_auth_user_query.first()
+
     # check for password in the request
     if not password:
         raise HTTPException(
@@ -1338,112 +1527,74 @@ def deactivate_or_soft_delete_user(
         )
 
     # create object
-    deactivate_delete_request = user_schema.UserDeactivationDeletion(
-        password=password, hide_interactions=hide_interactions
-    )
-
-    # get user from username
-    user_query = user_service.get_user_by_username_query(
-        username,
-        ["PBN", "DEL"],
-        db,
-    )
-    user = user_query.first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-
-    if user.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found",
-        )
+    deactivate_delete_request = user_schema.UserDeactivationDeletion(password=password)
 
     # check if password is right
     password_check = password_utils.verify_password(
-        deactivate_delete_request.password, user.password
+        entered_password=deactivate_delete_request.password,
+        hashed_password=curr_auth_user.password,
     )
     if not password_check:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
         )
 
-    # get current user
-    curr_auth_user = user_service.get_user_by_email(
-        current_user.email,
-        ["PBN", "DEL"],
-        db,
-    )
+    message = None
+    try:
+        # check action
+        if action == "deactivate":
+            # update status of the user
+            # curr_auth_user_query.update(
+            #     {"status": "DAH"},
+            #     synchronize_session=False,
+            # )
+            curr_auth_user.status = "DAH"
 
-    # check user identity
-    if username != curr_auth_user.username:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to perform this action",
-        )
+            message = f"Your @{curr_auth_user.username} account has been deactivated successfully"
 
-    # check action
-    if action == "deactivate":
-        # update status of the user
-        if deactivate_delete_request.hide_interactions:
-            user_query.update(
-                {"status": "DAH"},
-                synchronize_session=False,
-            )
-        else:
-            user_query.update(
-                {"status": "DAK"},
-                synchronize_session=False,
-            )
-
-        db.commit()
-
-        return {"message": "Your account has been deactivated successfully"}
-
-    elif action == "delete":
-        # send mail informing user about the account deletion, we will using mailtrap dummy server for testing
-        try:
+        elif action == "delete":
+            # send mail informing user about the account deletion, we will using mailtrap dummy server for testing
             email_subject = "Your VPKonnect account is scheduled for deletion"
             email_details = admin_schema.SendEmail(
                 template="account_deletion_email.html",
-                email=[user.email],
-                body_info={"username": user.username},
+                email=[curr_auth_user.email],
+                body_info={"username": curr_auth_user.username},
             )
-            email_utils.send_email(email_subject, email_details, background_tasks)
 
             # update status to pending_deletion_(hide/keep)
-            if deactivate_delete_request.hide_interactions:
-                user_query.update(
-                    {"status": "PDH"},
-                    synchronize_session=False,
-                )
-            else:
-                user_query.update(
-                    {"status": "PDK"},
-                    synchronize_session=False,
-                )
-            db.commit()
-        except Exception as exc:
-            print(exc)
+            # curr_auth_user_query.update(
+            #     {"status": "PDH"},
+            #     synchronize_session=False,
+            # )
+            curr_auth_user.status = "PDH"
+
+            email_utils.send_email(email_subject, email_details, background_tasks)
+
+            message = f"Your account deletion request is accepted. @{curr_auth_user.username} account will be deleted after a deactivation period of 30 days. An email for the same has been sent to {user.email}"
+        else:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="There was an error in processing delete user request",
-            ) from exc
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Error processing request",
+            )
 
-        return {
-            "message": f"Your account deletion request is accepted. {user.username} account will be deleted after a deactivation period of 30 days. An email for the same has been sent to {user.email}"
-        }
-
-    else:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Error processing request"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing deactivate/delete user request",
+        ) from exc
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:
+        print(exc)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing deactivate/delete user request",
+        ) from exc
+
+    return {"message": message}
 
 
 # # deactivate the user account
@@ -1525,13 +1676,13 @@ def report_item(
     reported_item: user_schema.UserContentReport,
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
 ):
     # check if item is there or not
     if reported_item.item_type == "post":
         post = post_service.get_a_post(
-            str(reported_item.item_id), ["DRF", "DEL", "FLD"], db
+            str(reported_item.item_id), ["DRF", "HID", "RMV", "FLD"], db
         )
         if not post:
             raise HTTPException(
@@ -1550,7 +1701,7 @@ def report_item(
 
     elif reported_item.item_type == "comment":
         comment = comment_service.get_a_comment(
-            str(reported_item.item_id), ["DEL", "FLD"], db
+            str(reported_item.item_id), ["HID", "RMV", "FLD"], db
         )
         if not comment:
             raise HTTPException(
@@ -1569,24 +1720,28 @@ def report_item(
 
     # get the reporter and reported user
     reporter_user = user_service.get_user_by_email(
-        str(current_user.email), ["PBN", "DEL"], db
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
     )
     reported_user = user_service.get_user_by_username(
-        reported_item.username, ["DEL", "PBN"], db
+        username=reported_item.username,
+        status_not_in_list=["DEL", "PDI", "PDB"],
+        db_session=db,
     )
     if not reported_user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Reported user not found"
         )
-    if reported_user.status in [
-        "DAH",
-        "DAK",
-        "PDH",
-        "PDK",
-    ]:
+    if reported_user.status in ("DAH", "PDH"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found",
+            detail="Reported user profile not found",
+        )
+    if reported_user.status == "PBN":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reported user is already permanently banned",
         )
 
     report_reason_user = None
@@ -1596,22 +1751,24 @@ def report_item(
         # if impersonation report where username is specified
         if reported_item.reason_username:
             report_reason_user = user_service.get_user_by_username(
-                reported_item.reason_username, ["PBN", "DEL"], db
+                username=reported_item.reason_username,
+                status_not_in_list=["DEL", "PDI", "PDB"],
+                db_session=db,
             )
             if not report_reason_user:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Original user not found",
+                    detail="Original user of impersonating user not found",
                 )
-            if report_reason_user.status in [
-                "DAH",
-                "DAK",
-                "PDH",
-                "PDK",
-            ]:
+            if report_reason_user.status in ("DAH", "PDH"):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Original user profile not found",
+                    detail="Original user profile of impersonating user not found",
+                )
+            if reported_user.status == "PBN":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Original user of impersonating user is already permanently banned",
                 )
 
     # user cannot report his/her own item
@@ -1623,7 +1780,10 @@ def report_item(
 
     # check table if report exists of same user for same item and same reason
     same_user_report = user_service.check_if_same_report_exists(
-        reporter_user.id, str(reported_item.item_id), reported_item.reason, db
+        user_id=reporter_user.id,
+        content_id=str(reported_item.item_id),
+        report_reason=reported_item.reason,
+        db_session=db,
     )
     if same_user_report:
         return {
@@ -1639,28 +1799,22 @@ def report_item(
         report_reason=reported_item.reason,
         report_reason_user_id=report_reason_user.id if report_reason_user else None,
     )
-    db.add(user_report)
-    db.commit()
+
+    try:
+        db.add(user_report)
+        db.commit()
+
+    except SQLAlchemyError as exc:
+        print(exc)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error proccesing report item request",
+        ) from exc
 
     return {
         "message": f"This {reported_item.item_type} has been reported anonymously and will be handled by content moderator."
     }
-
-
-@router.get("/feed")
-def user_feed(
-    db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
-    ),
-):
-    user = user_service.get_user_by_email(
-        str(current_user.email),
-        ["PBN", "DEL"],
-        db,
-    )
-
-    return {"message": f"Feed of {user.username}"}
 
 
 @router.post("/appeal")
@@ -1673,13 +1827,13 @@ def appeal_content(
 ):
     restrict_ban_entry = None
     report_entry = None
-
+    print(appeal_user_request.content_id)
     if appeal_user_request.content_type == "account":
         # get the user using username and email
         appeal_user = user_service.get_user_by_username_email(
             username=appeal_user_request.username,
             email=appeal_user_request.email,
-            status_in_list=["TBN", "PBN", "RSP", "RSF", "PDB"],
+            status_in_list=["TBN", "PBN", "RSP", "RSF", "PDB", "DAH", "PDH", "INA"],
             db_session=db,
         )
         if not appeal_user:
@@ -1690,14 +1844,14 @@ def appeal_content(
 
         appeal_user_request.content_id = appeal_user.id
 
-        # check if 30 days appeal limit is crossed, status for this is PDB
+        # check if 21 days appeal limit is crossed, status for this is PDB
         if appeal_user.status == "PDB":
             raise HTTPException(
                 status_code=status.HTTP_410_GONE,
                 detail="Your account has been permanently deleted because it did not follow our community guidelines. This decision cannot be reversed either because we have already reviewed it, or because 30 days have passed since your account was permanently banned.",
             )
 
-        # get the ban entry
+        # get the active ban entry
         restrict_ban_entry = admin_service.get_user_active_restrict_ban_entry(
             user_id=appeal_user.id,
             db_session=db,
@@ -1705,14 +1859,22 @@ def appeal_content(
         if not restrict_ban_entry:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Appeal user restrict/ban entry not found",
+                detail="Appeal user active restrict/ban entry not found",
             )
+
+        # update user status if status is DAH/PDH/INA and active ban status is TBN/PBN
+        if appeal_user.status in (
+            "DAH",
+            "PDH",
+            "INA",
+        ) and restrict_ban_entry.status in ("TBN", "PBN"):
+            appeal_user.status = restrict_ban_entry.status
 
         # check if any previous rejected appeal for account appealed here associated with same report
         previous_rejected_appeal = admin_service.get_a_appeal_report_id_content_id(
             report_id=restrict_ban_entry.report_id,
             content_id=appeal_user_request.content_id,
-            content_type=appeal_user_request.content_type,
+            content_type=[appeal_user_request.content_type],
             status="REJ",
             db_session=db,
         )
@@ -1723,7 +1885,7 @@ def appeal_content(
             )
 
     # if post/comment
-    else:
+    elif appeal_user_request.content_type in ("post", "comment"):
         appeal_user = user_service.get_user_by_username_email(
             username=appeal_user_request.username,
             email=appeal_user_request.email,
@@ -1735,13 +1897,45 @@ def appeal_content(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Appeal user not found"
             )
 
-        banned_post = None
-        banned_comment = None
+        # check if 28 days appeal limit is crossed or not
+        if appeal_user_request.content_type == "post":
+            post_appeal_submit_limit_expiry = (
+                db.query(post_model.Post)
+                .filter(
+                    post_model.Post.id == appeal_user_request.content_id,
+                    func.now() >= (post_model.Post.updated_at + timedelta(days=28)),
+                    post_model.Post.is_deleted == False,
+                )
+                .first()
+            )
+            if post_appeal_submit_limit_expiry:
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="This post is permanently banned and cannot be appealed for review. This decision cannot be reversed because 28 days have passed since your post was banned.",
+                )
+
+        elif appeal_user_request.content_type == "comment":
+            comment_appeal_submit_limit_expiry = (
+                db.query(comment_model.Comment)
+                .filter(
+                    comment_model.Comment.id == appeal_user_request.content_id,
+                    func.now()
+                    >= (comment_model.Comment.updated_at + timedelta(days=28)),
+                    comment_model.Comment.is_deleted == False,
+                )
+                .first()
+            )
+            if comment_appeal_submit_limit_expiry:
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="This comment is permanently banned and cannot be appealed for review. This decision cannot be reversed because 28 days have passed since your comment was banned.",
+                )
+
         # check if the post/comment is really banned/deleted or not
         if appeal_user_request.content_type == "post":
             banned_post = post_service.get_a_post(
                 post_id=str(appeal_user_request.content_id),
-                status_not_in_list=["PUB", "DRF", "HID", "FLB", "DEL", "FLD"],
+                status_not_in_list=["PUB", "DRF", "HID", "FLB", "RMV", "FLD"],
                 db_session=db,
             )
             if not banned_post:
@@ -1753,7 +1947,7 @@ def appeal_content(
         elif appeal_user_request.content_type == "comment":
             banned_comment = comment_service.get_a_comment(
                 comment_id=str(appeal_user_request.content_id),
-                status_not_in_list=["PUB", "HID", "FLB", "FLD", "DEL"],
+                status_not_in_list=["PUB", "HID", "FLB", "FLD", "RMV"],
                 db_session=db,
             )
             if not banned_comment:
@@ -1766,12 +1960,18 @@ def appeal_content(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid content type"
             )
 
-        banned_content = banned_post or banned_comment
-        # check if post/content is_deleted is True after BAN (21 days appeal limit is crossed)
-        if banned_content and banned_content.is_deleted:
+        # check if any previous rejected appeal for post/comment appealed here associated with same report
+        previous_rejected_appeal = admin_service.get_a_appeal_report_id_content_id(
+            report_id=None,
+            content_id=appeal_user_request.content_id,  # type: ignore
+            content_type=[appeal_user_request.content_type],
+            status="REJ",
+            db_session=db,
+        )
+        if previous_rejected_appeal:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"This {appeal_user_request.content_type} is permanently banned and cannot be appealed for review. This decision cannot be reversed because 30 days have passed since your {appeal_user_request.content_type} was banned.",
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Request to appeal this {appeal_user_request.content_type} has been denied. Further appeals are not permitted after a previous rejection",
             )
 
         # get the report entry
@@ -1809,29 +2009,12 @@ def appeal_content(
                 )
 
             report_entry = resolved_flagged_content_entry
-
-        # # check if 30 day limit has passed after report RSD (content banned)
-        # if func.now() >= (report_entry.updated_at + timedelta(days=30)):
-        #     raise HTTPException(
-        #         status_code=status.HTTP_409_CONFLICT,
-        #         detail=f"This {report_entry.reported_item_type} is permanently banned and cannot be appealed for review. This decision cannot be reversed because 30 days have passed since your {report_entry.reported_item_type} was banned.",
-        #     )
-
-        # check if any previous rejected appeal for post/comment appealed here associated with same report
-        previous_rejected_appeal = admin_service.get_a_appeal_report_id_content_id(
-            report_id=None,
-            content_id=appeal_user_request.content_id,  # type: ignore
-            content_type=appeal_user_request.content_type,
-            status="REJ",
-            db_session=db,
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid content type"
         )
-        if previous_rejected_appeal:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Request to appeal this {appeal_user_request.content_type} has been denied. Further appeals are not permitted after a previous rejection",
-            )
 
-    ban_report_id = restrict_ban_entry or report_entry
+    ban_report_id = uuid4()
     if restrict_ban_entry:
         ban_report_id = restrict_ban_entry.report_id
     elif report_entry:
@@ -1846,122 +2029,148 @@ def appeal_content(
         appeal_detail=appeal_user_request.detail,
     )
 
-    # image related code
-    # if there is image uploaded, create a subfolder for profile pics, if folder exists get it. Upload the image in this folder.
+    image_path = None
     if attachment:
-        # handling image validatity and unsupported types
-        try:
-            # we try to open the image, raises UnidentifiedImageError when image doesn't open
-            with Image.open(attachment.file) as img:
-                # verifies the image for any tampering/corruption, raises exception if verification fails
-                img.verify()
+        # get user subfolder
+        user_subfolder = image_folder / "user" / str(appeal_user.repr_id)
 
-            # move file pointer to the beginning of the file
-            attachment.file.seek(0)
+        # create a subfolder for profile images, if folder exists get it.
+        appeals_subfolder = image_utils.get_or_create_user_appeals_attachment_subfolder(
+            user_subfolder
+        )
 
-            # read the image file and check file size
-            # img_read = image.file.read()
-            # print(len(img_read))
+        # image validation and handling
+        image_name, image_path = image_utils.handle_image_operations(
+            username=appeal_user.username,
+            target_folder=appeals_subfolder,
+            image=attachment,
+        )
 
-            # Move to the end of the file, get image size, no need to read the file
-            attachment.file.seek(0, 2)
-            image_size = attachment.file.tell()
+        new_appeal.attachment = image_name
 
-            # move file pointer to the beginning of the file
-            attachment.file.seek(0)
-            print(image_size)
-
-            # if len(img_read) > MAX_SIZE: if image is read, we need to get the size using len()
-            if image_size > MAX_SIZE:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Image too large, you can upload upto 5 MiB",
-                )
-        except UnidentifiedImageError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid image format"
-            ) from exc
-        except HTTPException as exc:
-            raise exc
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Error processing image"
-            ) from exc
-
-        # If everything goes right then only we commit. Any exceptions, rollback.
-        try:
-            # create a subfolder for user specific uploads, if folder exists get it.
-            user_subfolder = image_utils.get_or_create_entity_image_subfolder(
-                "user", str(appeal_user.repr_id)
-            )
-
-            # create a subfolder for profile images, if folder exists get it.
-            appeals_subfolder = (
-                image_utils.get_or_create_user_appeals_attachment_subfolder(
-                    user_subfolder
-                )
-            )
-
-            upload_datetime = datetime.now().strftime("%Y%m%d%H%M%S")
-            attachment_name = (
-                f"{appeal_user.username}_{upload_datetime}_{attachment.filename}"
-            )
-
-            attachment_path = appeals_subfolder / attachment_name
-
-            with open(attachment_path, "wb+") as f:
-                shutil.copyfileobj(attachment.file, f)
-
-            new_appeal.attachment = attachment_name
-
-            db.add(new_appeal)
-            db.commit()
-
-        except Exception as exc:
-            db.rollback()
-            print(exc)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error submitting appeal",
-            ) from exc
-
-    else:
+    try:
         db.add(new_appeal)
         db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(exc)
+        if attachment and image_path:
+            image_utils.remove_image(path=image_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error submitting appeal",
+        ) from exc
 
     return {
         "message": f"Your appeal for {appeal_user_request.content_type} {'@'+ appeal_user.username if appeal_user_request.content_type == 'account' else appeal_user_request.content_id} has been submitted successfully and will be handled by content moderator."
     }
 
 
-# @router.post("/send_ban_mail")
-# def send_mail(
-#     email_parameters: admin_schema.SendEmail,
-#     background_tasks: BackgroundTasks,
-# ):
-#     # generate appeal link
-#     appeal_link = "https://vpkonnect.in/accounts/appeals/form_ban"
+# for internal jobs involving bans only
+@router.post("/send_ban_mail")
+def send_ban_mail(
+    email_parameters: admin_schema.UserSendBanEmail,
+    background_tasks: BackgroundTasks,
+):
+    # generate appeal link
+    appeal_link = "https://vpkonnect.in/accounts/appeals/form_ban"
 
-#     email_subject = "VPKonnect - Account Ban"
-#     email_details = admin_schema.SendEmail(
-#         template=(
-#             "permanent_ban_email.html"
-#             if consecutive_violation.status == "PBN"
-#             else "temporary_ban_email.html"
-#         ),
-#         email=[EmailStr(user.email)],
-#         body_info={
-#             "username": user.username,
-#             "link": appeal_link,
-#             "days": consecutive_violation.duration // 24,
-#             "ban_enforced_datetime": consecutive_violation.enforce_action_at.strftime(
-#                 "%b %d, %Y %H:%M %Z"
-#             ),
-#         },
-#     )
+    email_subject = "VPKonnect - Account Ban"
+    email_details = admin_schema.SendEmail(
+        template=(
+            "permanent_ban_email.html"
+            if email_parameters.status == "PBN"
+            else "temporary_ban_email.html"
+        ),
+        email=[EmailStr(email_parameters.email)],
+        body_info={
+            "username": email_parameters.username,
+            "link": appeal_link,
+            "days": email_parameters.duration // 24,
+            "ban_enforced_datetime": email_parameters.enforced_action_at.strftime(
+                "%b %d, %Y %H:%M %Z"
+            ),
+        },
+    )
 
-#     email_utils.send_email(
-#         email_subject=email_subject,
-#         email_details=email_details,
-#         bg_tasks=background_tasks,
-#     )
+    try:
+        email_utils.send_email(
+            email_subject=email_subject,
+            email_details=email_details,
+            bg_tasks=background_tasks,
+        )
+    except Exception as exc:
+        print("Error in sending mail", exc)
+
+
+@router.post("/send_delete_mail")
+def send_delete_mail(
+    email_request: admin_schema.UserSendDeleteEmail,
+    background_tasks: BackgroundTasks,
+):
+    # generate data link
+    data_link = "https://vpkonnect.in/accounts/data_request_form"
+
+    email_subject = email_request.subject
+    email_details = admin_schema.SendEmail(
+        template=email_request.template,
+        email=email_request.email,
+        body_info={
+            "link": data_link,
+        },
+    )
+
+    try:
+        email_utils.send_email(
+            email_subject=email_subject,
+            email_details=email_details,
+            bg_tasks=background_tasks,
+        )
+    except Exception as exc:
+        print("Error in sending mail", exc)
+
+
+@router.get("/violation")
+@auth_utils.authorize(["user"])
+def get_user_violation_status_details(
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
+    )
+
+    # get violation details
+    violation_details = admin_service.get_user_violation_details(
+        user_id=curr_auth_user.id, db_session=db
+    )
+
+    # get active restrict/ban if any
+    active_restrict_ban = admin_service.get_user_active_restrict_ban_entry(
+        user_id=curr_auth_user.id, db_session=db
+    )
+
+    # get guideline violation score
+    guideline_violation_score = admin_service.get_user_guideline_violation_score_query(
+        user_id=curr_auth_user.id, db_session=db
+    ).one()
+
+    # violation details response
+    violation_details_response = user_schema.UserViolationDetailResponse(
+        num_of_post_violations_no_restrict_ban=violation_details.num_of_post_violations_no_restrict_ban,
+        num_of_comment_violations_no_restrict_ban=violation_details.num_of_comment_violations_no_restrict_ban,
+        num_of_account_violations_no_restrict_ban=violation_details.num_of_account_violations_no_restrict_ban,
+        total_num_of_violations_no_restrict_ban=violation_details.total_num_of_violations_no_restrict_ban,
+        num_of_partial_account_restrictions=violation_details.num_of_partial_account_restrictions,
+        num_of_full_account_restrictions=violation_details.num_of_full_account_restrictions,
+        num_of_account_temporary_bans=violation_details.num_of_account_temporary_bans,
+        num_of_account_permanent_bans=violation_details.num_of_account_permanent_bans,
+        total_num_of_account_restrict_bans=violation_details.total_num_of_account_restrict_bans,
+        active_restrict_ban=active_restrict_ban,
+        violation_score=guideline_violation_score.final_violation_score,
+    )
+
+    return {f"{curr_auth_user.username} violation details": violation_details_response}

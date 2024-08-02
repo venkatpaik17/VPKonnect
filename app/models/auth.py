@@ -19,6 +19,7 @@ class UserAuthTrack(Base):
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
+    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)
 
 
 # class UserPasswordResetToken(Base):
@@ -83,3 +84,4 @@ class EmployeeAuthTrack(Base):
         ForeignKey("employee.id", ondelete="CASCADE"),
         nullable=False,
     )
+    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)

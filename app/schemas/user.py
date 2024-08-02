@@ -1,9 +1,13 @@
 import re
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from pydantic import UUID4, BaseModel, EmailStr, Field, validator
+
+from app.schemas.post import PostUserFeedResponse
+from app.utils.exception import CustomValidationError
 
 
 class UserBase(BaseModel):
@@ -18,8 +22,8 @@ class UserBase(BaseModel):
         pattern = r"^(?![.]+$)(?![_]+$)(?![\d]+$)(?![._]+$)(?!^[.])(?!.*\.{2,})[a-zA-Z0-9_.]{1,30}$"
 
         if not re.match(pattern, value):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid username"
+            raise CustomValidationError(
+                status_code=400, detail=f"Invalid username: {value}"
             )
 
         # Convert username to lowercase
@@ -31,9 +35,11 @@ class UserRegister(UserBase):
     confirm_password: str
     date_of_birth: date
     gender: str
-    country: str | None = None
+    country: str | None
     account_visibility: str | None
-    bio: str | None = None
+    bio: str | None
+    country_phone_code: str = Field(min_length=1, max_length=10)
+    phone_number: str = Field(max_length=12)
 
     @validator("date_of_birth", pre=True)
     def validate_age_from_date_of_birth(cls, value):
@@ -49,8 +55,8 @@ class UserRegister(UserBase):
 
         # check the age
         if age < 16:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+            raise CustomValidationError(
+                status_code=400,
                 detail="User must be of age 16 or above",
             )
 
@@ -99,6 +105,19 @@ class UserFollow(UserFollowRequest):
 class UserUsernameChange(BaseModel):
     new_username: str = Field(min_length=1, max_length=30)
 
+    @validator("new_username", pre=True)
+    def validate_username(cls, value):
+        # Validation pattern for username
+        pattern = r"^(?![.]+$)(?![_]+$)(?![\d]+$)(?![._]+$)(?!^[.])(?!.*\.{2,})[a-zA-Z0-9_.]{1,30}$"
+
+        if not re.match(pattern, value):
+            raise CustomValidationError(
+                status_code=400, detail=f"Invalid username: {value}"
+            )
+
+        # Convert username to lowercase
+        return value.lower()
+
 
 class UserFollowersFollowing(BaseModel):
     fetch: str
@@ -122,7 +141,6 @@ class UserRemoveFollower(BaseModel):
 
 class UserDeactivationDeletion(BaseModel):
     password: str
-    hide_interactions: bool = False
 
 
 class UserSendVerifyEmail(BaseModel):
@@ -138,8 +156,20 @@ class UserContentReport(BaseModel):
     reason_username: str | None
 
 
-class UserOutput(BaseModel):
+class UserBaseOutput(BaseModel):
     username: str
+
+    class Config:
+        orm_mode = True
+
+
+class UserPostOutput(UserBaseOutput):
+    profile_image: str | None
+
+
+class UserOutput(UserBaseOutput):
+    status: str
+    email: EmailStr
 
 
 class UserContentAppeal(BaseModel):
@@ -148,7 +178,6 @@ class UserContentAppeal(BaseModel):
     content_type: str
     content_id: UUID | None
     detail: str
-    case_number: int | None
 
     @validator("content_id")
     def validate_content_id(cls, val, values):
@@ -157,7 +186,92 @@ class UserContentAppeal(BaseModel):
         if (content_type_val in ("post", "comment") and not val) or (
             content_type_val == "account" and val
         ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid request. Issue with content ID",
-            )
+            if content_type_val in ("post", "comment"):
+                raise CustomValidationError(
+                    status_code=400,
+                    detail="Content ID is required for posts and comments.",
+                )
+            else:
+                raise CustomValidationError(
+                    status_code=400,
+                    detail="Content ID should not be provided for accounts.",
+                )
+
+        return val
+
+
+class UserProfileResponse(UserBaseOutput):
+    profile_picture: str | None
+    num_of_posts: int
+    num_of_followers: int
+    num_of_following: int
+    followed_by: list[str] | None
+    follows_user: bool | None
+
+    class Config:
+        orm_mode = True
+
+
+class UserPostRequest(BaseModel):
+    post_status: Literal["PUB", "DRF", "BAN", "FLB"]
+
+
+class UserFeedResponse(BaseModel):
+    posts: list[PostUserFeedResponse]
+    next_cursor: UUID | None
+
+    class Config:
+        orm_mode = True
+
+
+class AllUsersAdminRequest(BaseModel):
+    status: list[str] | None = None
+    sort: str | None = None
+
+
+class AllUsersAdminResponse(BaseModel):
+    profile_picture: str | None
+    repr_id: UUID4
+    first_name: str
+    last_name: str
+    username: str
+    email: EmailStr
+    country_phone_code: str | None
+    phone_number: str | None
+    date_of_birth: date
+    age: int
+    gender: str
+    country: str | None
+    account_visibility: str
+    bio: str | None
+    status: str
+    type: str
+    inactive_delete_after: int
+    is_verified: bool
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class UserActiveRestrictBan(BaseModel):
+    status: str
+    duration: str
+    enforce_action_at: datetime
+
+
+class UserViolationDetailResponse(BaseModel):
+    num_of_post_violations_no_restrict_ban: int
+    num_of_comment_violations_no_restrict_ban: int
+    num_of_account_violations_no_restrict_ban: int
+    total_num_of_violations_no_restrict_ban: int
+    num_of_partial_account_restrictions: int
+    num_of_full_account_restrictions: int
+    num_of_account_temporary_bans: int
+    num_of_account_permanent_bans: int
+    total_num_of_account_restrict_bans: int
+    active_restrict_ban: UserActiveRestrictBan | None
+    violation_score: int
+
+    class Config:
+        orm_mode = True

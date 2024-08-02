@@ -1,4 +1,23 @@
+from datetime import datetime
+
 import ulid
+
+
+def time_ago(post_datetime: datetime):
+    current_datetime = datetime.now().astimezone()
+    difference = current_datetime - post_datetime
+    seconds = difference.total_seconds()
+
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    elif seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    elif seconds < 86400:
+        return f"{int(seconds // 3600)}h"
+    elif seconds < 604800:
+        return f"{int(seconds // 86400)}d"
+    else:
+        return f"{int(seconds // 604800)}w"
 
 
 # function to generate ulid and return as uuid (used ulid-py package)

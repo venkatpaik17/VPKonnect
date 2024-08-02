@@ -158,6 +158,21 @@ def create_violation_moderator_notes(
             Upon investigation, it appears that the {username}'s account is either deleted or is no longer accessible.
             Your vigilance is appreciated, and while we were unable to review this report, we thank you for your commitment to making VPKonnect a safe and welcoming platform for all.""",
         },
+        "SE": {
+            "message": "We encountered a system error while processing the report.",
+            "detail": f"""Case number: {case_number}
+            Unfortunately, a system error occurred while attempting to process the report for {username}'s {content_type}. 
+            As a result, we are unable to complete the review at this time. 
+            Our technical team has been notified and will work to resolve the issue. 
+            We appreciate your patience and understanding as we work to fix this problem. Please try submitting the report again later.
+            We apologize for any inconvenience.""",
+        },  # system error
+        "UD": {
+            "message": f"Report closed due to {username} account deletion after inactivity",
+            "detail": f"""Case number: {case_number}
+            User inactivity time surpassed duration set by {username}. So this report submmited by user is hence closed.
+            """,
+        },
     }
 
     return violation_moderator_notes_dict.get(moderator_note)
@@ -175,3 +190,84 @@ action_entry_score_dict: dict[tuple[str, int], int] = {
     ("TBN", 504): 750,
     ("PBN", 99999): 850,
 }
+
+
+def create_appeal_moderator_notes(
+    username: str, moderator_note: str, case_number: int, content_type: str
+):
+    appeal_moderator_notes_dict = {
+        "AF1": {
+            "message": f"We have reviewed the appeal for {username}'s account, but it cannot be processed due to the rejection of a related post appeal in the past.",
+            "detail": f"""Case number: {case_number}
+            The appeal to revoke the restriction/ban on {username}'s account was rejected because an earlier appeal to revoke ban on one of the posts associated with this account restriction/ban was already reviewed and rejected. 
+            We understand that this might be upsetting and apologize for any inconvenience. Thank you for your understanding.
+            Please refer to our Appeal Policy for more details.""",
+        },
+        "AF2": {
+            "message": f"We have reviewed the appeal for {username}'s account, but it cannot be processed due to the rejection of a related {content_type} appeal in the past.",
+            "detail": f"""Case number: {case_number}
+            The appeal to revoke the restriction on {username}'s account was rejected because an earlier appeal to revoke ban on the {content_type} associated with this account restriction/ban was already reviewed and rejected. 
+            We understand that this might be upsetting and apologize for any inconvenience. Thank you for your understanding.
+            Please refer to our Appeal Policy for more details.""",
+        },
+        "AF3": {
+            "message": f"We have reviewed the appeal for {username}'s post, but it cannot be processed due to the rejection of related account restriction appeal.",
+            "detail": f"""Case number: {case_number}
+            The appeal to revoke the ban on post was rejected because an earlier appeal to revoke restriction on {username}'s account involving this post ban was already reviewed and rejected. 
+            We understand that this might be upsetting and apologize for any inconvenience. Thank you for your understanding.
+            Please refer to our Appeal Policy for more details.""",
+        },
+        "AF4": {
+            "message": f"We have reviewed the appeal for {username}'s {content_type}, but it cannot be processed due to the rejection of related account restriction/ban appeal.",
+            "detail": f"""Case number: {case_number}
+            The appeal to revoke the ban on {content_type} was rejected because an earlier appeal to revoke the restriction/ban on {username}'s account, involving this {content_type} was already reviewed and rejected. 
+            We understand that this might be upsetting and apologize for any inconvenience. Thank you for your understanding.
+            Please refer to our Appeal Policy for more details.""",
+        },
+        "AF0": {
+            "message": f"We have reviewed the appeal for {username}'s {content_type}, but the restriction/ban associated with it was confirmed as fair.",
+            "detail": f"""Case number: {case_number}
+            To keep our review process as fair as possible, we use the same set of Community Guidelines to review all appeals.
+            The appeal was rejected after a thorough review, and we have confirmed that the restriction/ban on the associated {content_type} was applied correctly. 
+            We understand that this might be upsetting and apologize for any inconvenience. Thank you for your understanding.""",
+        },
+        "ANU": {
+            "message": f"We could not process the appeal for {username}'s {content_type} because the account could not be found.",
+            "detail": f"""Case number: {case_number}
+            We could not locate the user account associated with this appeal. This may be due to account deletion or inaccessibility. 
+            Hence we could not review this appeal.""",
+        },  # appeal no action user not found
+        "ANPC": {
+            "message": f"We could not process the appeal for {username}'s {content_type} because{content_type} could not be found.",
+            "detail": f"""Case number: {case_number}
+            Upon investigation, it appears that the post/comment in question has either been deleted or is no longer accessible.
+            Since we could not access the post/comment, we were unable to review you appeal.""",
+        },  # appeal no action post/comment
+        "AE": {
+            "message": "The appeal has expired due to inaction within the appeal process timeframe.",
+            "detail": f"""Case number: {case_number}
+            The appeal for {username}'s {content_type} has expired because the required actions were not taken within the designated timeframe. 
+            As a result, the appeal can no longer be reviewed or processed.
+            Please refer to our Appeal Policy for information on the appeal process and timeframes for future reference. 
+            We are committed to resolving these issues and appreciate your patience during this process""",
+        },  # appeal expired
+        "SE": {
+            "message": "We encountered a system error while processing the appeal.",
+            "detail": f"""Case number: {case_number}
+            Unfortunately, a system error occurred while attempting to process the appeal for {username}'s {content_type}. 
+            As a result, we are unable to complete the review at this time. 
+            Our technical team has been notified and will work to resolve the issue. 
+            We appreciate your patience and understanding as we work to fix this problem. Please try submitting the appeal again later.
+            We apologize for any inconvenience.""",
+        },  # system error
+        "AS": {
+            "message": f"The appeal for {username}'s {content_type} has been accepted.",
+            "detail": f"""Case number: {case_number}
+            We are pleased to inform you that your appeal has been reviewed and accepted. The restriction/ban on {username}'s {content_type} has been revoked accordingly.
+            Thank you for your patience and understanding. 
+            Please refer to our Appeal Policy for further details on what this decision entails and any next steps that may be required.
+            If you have any further questions or concerns, feel free to reach out to our support team.""",
+        },
+    }
+
+    return appeal_moderator_notes_dict.get(moderator_note)

@@ -14,7 +14,7 @@ class UserStatusEnum(str, Enum):
     RESTRICTED_PARTIAL = "RSP"
     RESTRICTED_FULL = "RSF"
     DEACTIVATED_HIDE = "DAH"
-    DEACTIVATED_KEEP = "DAK"
+    DEACTIVATED_KEEP = "DAK"  # to be removed
     PENDING_DELETE_HIDE = "PDH"
     PENDING_DELETE_KEEP = "PDK"  # to be removed
     PENDING_DELETE_BAN = "PDB"
@@ -53,19 +53,19 @@ class PostStatusEnum(str, Enum):
     DRAFT = "DRF"
     HIDDEN = "HID"
     BANNED = "BAN"
-    DELETED = "DEL"
+    REMOVED = "RMV"
     FLAGGED_TO_BE_BANNED = "FLB"
     FLAGGED_DELETED = "FLD"
 
 
 class PostLikeStatusEnum(str, Enum):
     """
-    Enum for postlike status values 'active', 'hidden', 'deleted'
+    Enum for postlike status values 'active', 'hidden', 'removed'
     """
 
     ACTIVE = "ACT"
     HIDDEN = "HID"
-    DELETED = "DEL"
+    REMOVED = "RMV"
 
 
 class CommentStatusEnum(str, Enum):
@@ -76,7 +76,7 @@ class CommentStatusEnum(str, Enum):
     PUBLISHED = "PUB"
     HIDDEN = "HID"
     BANNED = "BAN"
-    DELETED = "DEL"
+    REMOVED = "RMV"
     FLAGGED_TO_BE_BANNED = "FLB"
     FLAGGED_DELETED = "FLD"
 
@@ -88,7 +88,7 @@ class CommentLikeStatusEnum(str, Enum):
 
     ACTIVE = "ACT"
     HIDDEN = "HID"
-    DELETED = "DEL"
+    REMOVED = "RMV"
 
 
 class UserFollowAssociationStatusEnum(str, Enum):
@@ -102,7 +102,6 @@ class UserFollowAssociationStatusEnum(str, Enum):
     UNFOLLOWED = "UNF"
     REMOVED = "RMV"
     HIDDEN = "HID"
-    DELETED = "DEL"
 
 
 class UserAuthTrackStatusEnum(str, Enum):
@@ -149,6 +148,7 @@ class UserContentAppealDetailStatusEnum(str, Enum):
     ACCEPTED = "ACP"
     ACCEPTED_RELATED = "ACR"
     REJECTED = "REJ"
+    REJECTED_RELATED = "RJR"
     CLOSED = "CSD"
 
 
@@ -158,15 +158,23 @@ class UserAccountHistoryEventTypeEnum(str, Enum):
     """
 
     CHANGED = "CNG"
-    REMOVED = "RMV"
+    REMOVED = "RMV"  # dp/bio removed
     CREATED = "CRT"
     DEACTIVATED = "DAV"
     DEACTIVATED_DELETE_SCHEDULED = "DDS"
+    RESTRICTED_PARTIAL = "RSP"
+    RESTRICTED_FULL = "RSF"
+    BANNED_PERMANENT = "BNP"
+    BANNED_TEMPORARY = "BNT"
     INACTIVATED_DELETE_SCHEDULED = "IDS"
     BANNED_DELETE_SCHEDULED = "BDS"
     DELETED = "DEL"
     REACTIVATED = "RAV"
     RESTORED = "RST"
+    UNRESTRICTED_PARTIAL = "URP"
+    UNRESTRICTED_FULL = "URF"
+    UNBANNED_TEMPORARY = "UBT"
+    UNBANNED_PERMANENT = "UBP"
 
 
 class EmployeeStatusEnum(str, Enum):
@@ -218,6 +226,14 @@ class EmployeeDesignationEnum(str, Enum):
     CHIEF_MARKETING_OFFICER = "CMO"
     CHIEF_FINANCIAL_OFFICER = "CFO"
     CHIEF_OPERATING_OFFICER = "COO"
+    DIRECTOR_OF_HUMAN_RESOURCE = "DHR"
+    DIRECTOR_OF_PRODUCTS = "DOP"
+    DIRECTOR_OF_MARKETTING = "DOM"
+    HUMAN_RESOURCE_1 = "HR1"
+    HUMAN_RESOURCE_2 = "HR2"
+    HUMAN_RESOURCE_3 = "HR3"
+    HUMAN_RESOURCE_MANAGER_1 = "HRM1"
+    HUMAN_RESOURCE_MANAGER_2 = "HRM2"
     SOFTWARE_DEVELOPMENT_ENGINEER_1_FRONTEND = "SDE1F"
     SOFTWARE_DEVELOPMENT_ENGINEER_2_FRONTEND = "SDE2F"
     SOFTWARE_DEVELOPMENT_ENGINEER_3_FRONTEND = "SDE3F"
@@ -234,6 +250,7 @@ class EmployeeDesignationEnum(str, Enum):
     SOFTWARE_DEVELOPMENT_ENGINEER_TEST_2 = "SDET2"
     SOFTWARE_DEVELOPMENT_ENGINEER_TEST_3 = "SDET3"
     SOFTWARE_DEVELOPMENT_ENGINEER_TEST_4 = "SDET4"
+    CONTENT_COMMUNITY_ADMIN = "CCA"
     CONTENT_MODERATOR = "CNM"
     COMMUNITY_MODERATOR = "CMM"
     USER_OPERATIONS_ANALYST = "UOA"

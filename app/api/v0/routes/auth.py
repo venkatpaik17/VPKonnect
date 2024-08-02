@@ -1,17 +1,6 @@
-import re
 from datetime import timedelta
-from typing import Optional
 
-from fastapi import (
-    APIRouter,
-    Cookie,
-    Depends,
-    Form,
-    Header,
-    HTTPException,
-    Request,
-    status,
-)
+from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.security.oauth2 import OAuth2PasswordRequestForm
@@ -48,12 +37,14 @@ def user_login(
         device_info=user_device_info,
     )
     # check if username field is email or username
-    is_email = auth_utils.check_username_or_email(credentials.username)
+    is_email = auth_utils.check_username_or_email(credential=credentials.username)
 
     # get user
     if is_email:
         user_query = user_service.get_user_by_email_query(
-            credentials.username, ["DEL"], db
+            email=credentials.username,
+            status_not_in_list=["DEL"],
+            db_session=db,
         )
     else:
         user_query = user_service.get_user_by_username_query(
@@ -67,11 +58,20 @@ def user_login(
         )
 
     # verify password
-    verify_pass = password_utils.verify_password(credentials.password, user.password)
+    verify_pass = password_utils.verify_password(
+        entered_password=credentials.password, hashed_password=user.password
+    )
     if not verify_pass:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Credentials"
         )
+
+    if user.is_verified == False:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your account registration before proceeding further. Check your email for verification link and follow the steps accordingly",
+        )
+    # redirect to verification page (frontend)
 
     if user.status == "PDI":
         raise HTTPException(
@@ -93,20 +93,15 @@ def user_login(
     try:
         # if account is deactivated then it should be activated by updating status to active
         # but if there is any active retrict or ban i.e. RSP, RSF, TBN then update the status directly to restrict/ban status
-        # PBN is not considered because, even if account is deactivated or inactive, status will be changed to PBN during actiom enforcement, for rest it won't
-        if user.status in [
-            "DAH",
-            "DAK",
-            "PDH",
-            "PDK",
-            "INA",
-        ]:
+        # PBN is not considered (except in case on PDH) because, even if account is deactivated or inactive, status will be changed to PBN during action enforcement (except for PDH), for rest it won't
+        if user.status in ("DAH", "PDH", "INA"):
             print(user.status)
-            if restrict_ban_entry and restrict_ban_entry.status in [
+            if restrict_ban_entry and restrict_ban_entry.status in (
                 "RSP",
                 "RSF",
                 "TBN",
-            ]:
+                "PBN",
+            ):
                 # user_query.update(
                 #     {"status": restrict_ban_entry.status}, synchronize_session=False
                 # )
@@ -119,7 +114,7 @@ def user_login(
 
     except SQLAlchemyError as exc:
         db.rollback()
-        # print(exc)
+        print(exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing login request",
@@ -151,9 +146,9 @@ def user_login(
     }
 
     # create the tokens
-    user_access_token = auth_utils.create_access_token(access_token_claims)
+    user_access_token = auth_utils.create_access_token(claims=access_token_claims)
     user_refresh_token, refresh_token_unique_id = auth_utils.create_refresh_token(
-        refresh_token_claims
+        claims=refresh_token_claims
     )
 
     # set the response data
@@ -171,8 +166,15 @@ def user_login(
     )
     # print(user_device_info)
 
-    # add login session to user session table and add an entry to user auth track to track the refresh token wrt to user and device
+    # check if there is any previous active session for the user with same device info, if yes then invalidate it (is_active to False)
+    # add new login session to user session table and add an entry to user auth track to track the refresh token wrt to user and device
     try:
+        previous_active_user_session = user_service.get_user_session_one_entry_query(
+            user_id=user.id, device_info=user_device_info, is_active=True, db_session=db
+        ).first()
+        if previous_active_user_session:
+            previous_active_user_session.is_active = False
+
         add_user_session = user_model.UserSession(
             device_info=user_device_info, user_id=user.id
         )
@@ -189,6 +191,7 @@ def user_login(
     except SQLAlchemyError as exc:
         # roll back and blacklist tokens
         db.rollback()
+        print(exc)
         # auth_utils.blacklist_token(user_access_token)
         auth_utils.blacklist_token(refresh_token_unique_id)
 
@@ -212,12 +215,14 @@ def refresh_token_user(
         )
 
     # verify refresh token. We verify first and then check blacklist, since we need jti
-    token_claims, token_verify = auth_utils.verify_refresh_token(refresh_token)
+    token_claims, token_verify = auth_utils.verify_refresh_token(
+        refresh_token=refresh_token
+    )
     # print(token_verify)
 
     # check token blacklist using jti
     refresh_token_blacklist_check = auth_utils.is_token_blacklisted(
-        token_claims.token_id
+        token=token_claims.token_id
     )
     if refresh_token_blacklist_check:
         raise HTTPException(
@@ -233,7 +238,7 @@ def refresh_token_user(
     }
 
     # create a new access token
-    new_user_access_token = auth_utils.create_access_token(access_token_claims)
+    new_user_access_token = auth_utils.create_access_token(claims=access_token_claims)
     access_token_data = auth_schema.AccessToken(
         access_token=new_user_access_token, token_type="bearer"
     )
@@ -245,7 +250,7 @@ def refresh_token_user(
         (
             new_user_refresh_token,
             refresh_token_unique_id,
-        ) = auth_utils.create_refresh_token(refresh_token_claims)
+        ) = auth_utils.create_refresh_token(claims=refresh_token_claims)
         response.set_cookie(
             key="refresh_token",
             value=new_user_refresh_token,
@@ -254,28 +259,23 @@ def refresh_token_user(
         )
         try:
             user = user_service.get_user_by_email(
-                str(token_claims.email),
-                ["PBN", "DEL"],
-                db,
+                email=str(token_claims.email),
+                status_not_in_list=["PDI", "PDB", "DEL"],
+                db_session=db,
             )
             if not user:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
                 )
-            if user.status in [
-                "DAH",
-                "DAK",
-                "PDH",
-                "PDK",
-            ]:
+            if user.status in ("DAH", "PDH"):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="User profile not found",
                 )
-            if user.status == "TBN":  # type: ignore
+            if user.status in ("TBN", "PBN"):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Unable to process the request",
+                    detail="Unable to process the request. User is banned",
                 )
 
             add_user_auth_track = auth_model.UserAuthTrack(
@@ -285,7 +285,7 @@ def refresh_token_user(
             )
 
             user_auth_entry = auth_service.get_auth_track_entry_by_token_id_query(
-                token_claims.token_id, "ACT", db
+                token_id=token_claims.token_id, status="ACT", db_session=db
             )
             if not user_auth_entry.first():
                 raise HTTPException(
@@ -313,7 +313,7 @@ def refresh_token_user(
 
     # check refresh token status
     token_active = auth_service.check_refresh_token_id_in_user_auth_track(
-        token_claims.token_id, "ACT", db
+        token_id=token_claims.token_id, status="ACT", db_session=db
     )
     if not token_active:
         raise HTTPException(
@@ -328,21 +328,22 @@ def refresh_token_user(
 @router.get(settings.api_prefix + "/users/dummy")
 def dummy_user(
     user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="user")
+        auth_utils.AccessRoleDependency(role=["user"])
     ),
 ):
     return {"message": f"checking token rotation {user.email}"}
 
 
-# logout route, Header() fetches "Authorization" parameter
+# logout route
 @router.post(settings.api_prefix + "/users/logout")
 def user_logout(
     logout_user: auth_schema.UserLogout,
     refresh_token: str = Cookie(None),
     db: Session = Depends(get_db),
-    is_api_call: bool = True,
+    is_func_call: bool = False,
 ):
     refresh_token_id = None
+    user = None
     if logout_user.flow == "user":
         # check for refresh token cookie in the request
         if not refresh_token:
@@ -352,7 +353,7 @@ def user_logout(
 
         # identify the user,to check whether user is logging out from his/her own account and not others.
         # get user email from access token
-        get_user_claims = auth_utils.decode_token_get_user_token_id(refresh_token)
+        get_user_claims = auth_utils.decode_token_get_user_token_id(token=refresh_token)
         if not get_user_claims:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -363,9 +364,9 @@ def user_logout(
 
         # get user from db using email
         user = user_service.get_user_by_email(
-            user_email,
-            ["DEL"],
-            db,
+            email=user_email,
+            status_not_in_list=["PDI", "PDB", "DEL"],
+            db_session=db,
         )
         if not user:
             raise HTTPException(
@@ -381,88 +382,131 @@ def user_logout(
             )
 
     elif logout_user.flow == "admin":
-        user = user_service.get_user_by_username(logout_user.username, ["DEL"], db)
+        user = user_service.get_user_by_username(
+            username=logout_user.username,
+            status_not_in_list=["PDI", "PDB", "DEL"],
+            db_session=db,
+        )
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User to be logged out not found",
             )
 
-    if logout_user.action == "one":
-        # blacklist the refresh token using token id
-        if not refresh_token_id:
-            refresh_token_id = (
-                auth_service.get_all_user_auth_track_entry_by_user_id_device_info(
-                    user.id, logout_user.device_info, "ACT", db
-                )
-            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid flow value for logout",
+        )
+    try:
+        if logout_user.action == "one":
+            # for admin flow, fetch the refresh_token_id
             if not refresh_token_id:
+                refresh_token_id = (
+                    auth_service.get_all_user_auth_track_entry_by_user_id_device_info(
+                        user_id=user.id,
+                        device_info=logout_user.device_info,
+                        status="ACT",
+                        db_session=db,
+                    )
+                )
+                if not refresh_token_id:
+                    if is_func_call:
+                        print("User is already logged out")
+                        return
+
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="User auth entry not found",
+                    )
+
+            # blacklist the refresh token using token id
+            auth_utils.blacklist_token(token=refresh_token_id)
+
+            # fetch the active user session entry query
+            user_logout_one_query = user_service.get_user_session_one_entry_query(
+                user_id=str(user.id),
+                device_info=logout_user.device_info,
+                is_active=True,
+                db_session=db,
+            )
+            user_logout_one = user_logout_one_query.first()
+            if not user_logout_one:
+                if is_func_call:
+                    print("Check user session for any issues")
+                    return
+
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User auth entry not found",
+                    detail="User Login/Session entry not found",
                 )
 
-        auth_utils.blacklist_token(refresh_token_id)
-
-        # fetch the active user session entry query
-        user_logout_one_query = user_service.get_user_session_one_entry_query(
-            str(user.id), logout_user.device_info, True, db
-        )
-        user_logout_one = user_logout_one_query.first()
-        if not user_logout_one:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User Login/Session entry not found",
+            # update is_active in user session entry
+            user_logout_one_query.update(
+                {"is_active": False}, synchronize_session=False
             )
 
-        # update is_active in user session entry
-        user_logout_one_query.update({"is_active": False}, synchronize_session=False)
-
-        db.commit()
-
-    elif logout_user.action == "all":
-        # get all user auth entries based on user id
-        user_auth_track_entries = (
-            auth_service.get_all_user_auth_track_entries_by_user_id(
-                str(user.id), "ACT", db
+        elif logout_user.action == "all":
+            # get all user auth entries based on user id
+            user_auth_track_entries = (
+                auth_service.get_all_user_auth_track_entries_by_user_id(
+                    user_id=str(user.id), status="ACT", db_session=db
+                )
             )
-        )
-        if not user_auth_track_entries:
-            if is_api_call:
+            if not user_auth_track_entries:
+                if is_func_call:
+                    print("User is already logged out")
+                    return
+
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="User auth track entries not found",
                 )
-            else:
-                print("User is already logged out")
-                return
 
-        # fetch all refresh token ids and blacklist them
-        all_refresh_token_ids = [
-            item.refresh_token_id for item in user_auth_track_entries
-        ]
-        for token_id in all_refresh_token_ids:
-            auth_utils.blacklist_token(token_id)
+            # fetch all refresh token ids and blacklist them
+            all_refresh_token_ids = [
+                item.refresh_token_id for item in user_auth_track_entries
+            ]
+            for token_id in all_refresh_token_ids:
+                auth_utils.blacklist_token(token=token_id)
 
-        # fetch all active user session entries
-        user_logout_all_query = user_service.get_user_session_entries_query_by_user_id(
-            str(user.id), True, db
-        )
-        user_logout_all = user_logout_all_query.all()
-        if not user_logout_all:
-            if is_api_call:
+            # fetch all active user session entries
+            user_logout_all_query = (
+                user_service.get_user_session_entries_query_by_user_id(
+                    user_id=str(user.id), is_active=True, db_session=db
+                )
+            )
+            user_logout_all = user_logout_all_query.all()
+            if not user_logout_all:
+                if is_func_call:
+                    print("Check user session for any issues")
+                    return
+
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="User Login/Session entries not found",
                 )
-            else:
-                print("Check user session for any issues")
-                return
 
-        # update is_active in user session entries
-        user_logout_all_query.update({"is_active": False}, synchronize_session=False)
+            # update is_active in user session entries
+            user_logout_all_query.update(
+                {"is_active": False}, synchronize_session=False
+            )
 
         db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing logout request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        print(exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing logout request",
+        ) from exc
 
     response_data = {"message": f"{logout_user.username} successfully logged out"}
     response = JSONResponse(content=response_data)
@@ -491,22 +535,36 @@ def employee_login(
     )
 
     # check the username whether it is email or emp_id
-    is_email = auth_utils.check_username_or_email(credentials.username)
+    is_email = auth_utils.check_username_or_email(credential=credentials.username)
 
     # check username in the db
     if is_email:
-        employee = employee_service.get_employee_by_work_email(credentials.username, db)
+        employee = employee_service.get_employee_by_work_email(
+            work_email=credentials.username,
+            status_not_in_list=["TER"],
+            db_session=db,
+        )
     else:
-        employee = employee_service.get_employee_by_emp_id(credentials.username, db)
+        employee = employee_service.get_employee_by_emp_id(
+            emp_id=credentials.username,
+            status_not_in_list=["TER"],
+            db_session=db,
+        )
 
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Invalid credentials"
         )
 
+    if employee.status == "SUP":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Credentials are withheld due to suspension. Access denied until further notice",
+        )
+
     # verify password
     verify_password = password_utils.verify_password(
-        credentials.password, employee.password
+        entered_password=credentials.password, hashed_password=employee.password
     )
     if not verify_password:
         raise HTTPException(
@@ -522,9 +580,9 @@ def employee_login(
     }
 
     # create the tokens
-    employee_access_token = auth_utils.create_access_token(access_token_claims)
+    employee_access_token = auth_utils.create_access_token(claims=access_token_claims)
     employee_refresh_token, refresh_token_unique_id = auth_utils.create_refresh_token(
-        refresh_token_claims
+        claims=refresh_token_claims
     )
 
     # set the response data
@@ -557,10 +615,11 @@ def employee_login(
         db.commit()
 
     except SQLAlchemyError as exc:
-        # roll back and blacklist tokens
+        # roll back and blacklist refresh token
         db.rollback()
-        auth_utils.blacklist_token(employee_access_token)
-        auth_utils.blacklist_token(refresh_token_unique_id)
+        print(exc)
+        # auth_utils.blacklist_token(employee_access_token)
+        auth_utils.blacklist_token(token=refresh_token_unique_id)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -582,12 +641,14 @@ def refresh_token_employee(
         )
 
     # verify refresh token. We verify first and then check blacklist, since we need jti
-    token_claims, token_verify = auth_utils.verify_refresh_token(refresh_token)
+    token_claims, token_verify = auth_utils.verify_refresh_token(
+        refresh_token=refresh_token
+    )
     # print(token_verify)
 
     # check token blacklist using jti
     refresh_token_blacklist_check = auth_utils.is_token_blacklisted(
-        token_claims.token_id
+        token=token_claims.token_id
     )
     if refresh_token_blacklist_check:
         raise HTTPException(
@@ -603,7 +664,9 @@ def refresh_token_employee(
     }
 
     # create a new access token
-    new_employee_access_token = auth_utils.create_access_token(access_token_claims)
+    new_employee_access_token = auth_utils.create_access_token(
+        claims=access_token_claims
+    )
     access_token_data = auth_schema.AccessToken(
         access_token=new_employee_access_token, token_type="bearer"
     )
@@ -615,7 +678,7 @@ def refresh_token_employee(
         (
             new_employee_refresh_token,
             refresh_token_unique_id,
-        ) = auth_utils.create_refresh_token(refresh_token_claims)
+        ) = auth_utils.create_refresh_token(claims=refresh_token_claims)
         response.set_cookie(
             key="refresh_token",
             value=new_employee_refresh_token,
@@ -624,8 +687,9 @@ def refresh_token_employee(
         )
         try:
             employee = employee_service.get_employee_by_work_email(
-                token_claims.email,
-                db,
+                work_email=token_claims.email,
+                status_not_in_list=["SUP", "TER"],
+                db_session=db,
             )
             if not employee:
                 raise HTTPException(
@@ -640,7 +704,7 @@ def refresh_token_employee(
 
             employee_auth_entry = (
                 auth_service.get_employee_auth_track_entry_by_token_id_query(
-                    token_claims.token_id, "ACT", db
+                    token_id=token_claims.token_id, status="ACT", db_session=db
                 )
             )
             if not employee_auth_entry.first():
@@ -662,6 +726,7 @@ def refresh_token_employee(
             raise exc
         except SQLAlchemyError as exc:
             db.rollback()
+            print(exc)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Error processing auth",
@@ -669,7 +734,7 @@ def refresh_token_employee(
 
     # check refresh token status
     token_active = auth_service.check_refresh_token_id_in_employee_auth_track(
-        token_claims.token_id, "ACT", db
+        token_id=token_claims.token_id, status="ACT", db_session=db
     )
     if not token_active:
         raise HTTPException(
@@ -696,7 +761,7 @@ def employee_logout(
 
     # identify the employee,to check whether employee is logging out from his/her own account and not others.
     # get employee email from access token
-    get_employee_claims = auth_utils.decode_token_get_user_token_id(refresh_token)
+    get_employee_claims = auth_utils.decode_token_get_user_token_id(token=refresh_token)
     if not get_employee_claims:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -704,86 +769,103 @@ def employee_logout(
         )
 
     employee_email, refresh_token_id = get_employee_claims[0], get_employee_claims[1]
-
+    print(employee_email)
     # get employee from db using email
     employee = employee_service.get_employee_by_work_email(
-        employee_email,
-        db,
+        work_email=employee_email,
+        status_not_in_list=["SUP", "TER"],
+        db_session=db,
     )
     if not employee:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found"
         )
 
-    # check username from request with username from user entry
+    # check emp id from request with emp_id from employee entry
     if employee.emp_id != logout_employee.emp_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
 
-    if logout_employee.action == "one":
-        # blacklist refresh token using token id
-        auth_utils.blacklist_token(refresh_token_id)
+    try:
+        if logout_employee.action == "one":
+            # blacklist refresh token using token id
+            auth_utils.blacklist_token(token=refresh_token_id)
 
-        # fetch the active user session entry query
-        employee_logout_one_query = (
-            employee_service.get_employee_session_one_entry_query(
-                str(employee.id), logout_employee.device_info, True, db
+            # fetch the active user session entry query
+            employee_logout_one_query = (
+                employee_service.get_employee_session_one_entry_query(
+                    employee_id=str(employee.id),
+                    device_info=logout_employee.device_info,
+                    is_active=True,
+                    db_session=db,
+                )
             )
-        )
-        employee_logout_one = employee_logout_one_query.first()
-        if not employee_logout_one:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee Login/Session entry not found",
+            employee_logout_one = employee_logout_one_query.first()
+            if not employee_logout_one:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Employee Login/Session entry not found",
+                )
+
+            # update is_active in user session entry
+            employee_logout_one_query.update(
+                {"is_active": False}, synchronize_session=False
             )
 
-        # update is_active in user session entry
-        employee_logout_one_query.update(
-            {"is_active": False}, synchronize_session=False
-        )
+        elif logout_employee.action == "all":
+            # get all user auth entries based on user id
+            employee_auth_track_entries = (
+                auth_service.get_all_employee_auth_track_entries_by_employee_id(
+                    employee_id=str(employee.id), status="ACT", db_session=db
+                )
+            )
+            if not employee_auth_track_entries:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Employee auth track entries not found",
+                )
+
+            # fetch all refresh token ids and blacklist them
+            all_refresh_token_ids = [
+                item.refresh_token_id for item in employee_auth_track_entries
+            ]
+            for token_id in all_refresh_token_ids:
+                auth_utils.blacklist_token(token=token_id)
+
+            # fetch all active employee session entries
+            employee_logout_all_query = (
+                employee_service.get_employee_session_entries_query_by_employee_id(
+                    employee_id=str(employee.id), is_active=True, db_session=db
+                )
+            )
+            if not employee_logout_all_query.all():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Employee Login/Session entries not found",
+                )
+
+            # update is_active in user session entries
+            employee_logout_all_query.update(
+                {"is_active": False}, synchronize_session=False
+            )
 
         db.commit()
-
-    elif logout_employee.action == "all":
-        # get all user auth entries based on user id
-        employee_auth_track_entries = (
-            auth_service.get_all_employee_auth_track_entries_by_employee_id(
-                str(employee.id), "ACT", db
-            )
-        )
-        if not employee_auth_track_entries:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee auth track entries not found",
-            )
-
-        # fetch all refresh token ids and blacklist them
-        all_refresh_token_ids = [
-            item.refresh_token_id for item in employee_auth_track_entries
-        ]
-        for token_id in all_refresh_token_ids:
-            auth_utils.blacklist_token(token_id)
-
-        # fetch all active employee session entries
-        employee_logout_all_query = (
-            employee_service.get_employee_session_entries_query_by_employee_id(
-                str(employee.id), True, db
-            )
-        )
-        if not employee_logout_all_query.all():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee Login/Session entries not found",
-            )
-
-        # update is_active in user session entries
-        employee_logout_all_query.update(
-            {"is_active": False}, synchronize_session=False
-        )
-
-        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing logout request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        print(exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing logout request",
+        ) from exc
 
     response_data = {"message": f"{logout_employee.emp_id} successfully logged out"}
     response = JSONResponse(content=response_data)
@@ -802,7 +884,7 @@ def employee_logout(
 @router.get(settings.api_prefix + "/employees/dummy")
 def dummy_emp(
     employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role="employee")
+        auth_utils.AccessRoleDependency(role=["employee"])
     ),
 ):
     return {"message": f"checking token rotation {employee.email}"}

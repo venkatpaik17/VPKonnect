@@ -5,6 +5,7 @@ Revises: 1259c014d835
 Create Date: 2024-01-21 15:51:53.515044
 
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -26,7 +27,6 @@ def upgrade() -> None:
             "repr_id",
             UUID(as_uuid=True),
             nullable=False,
-            server_default=sa.func.gen_random_uuid(),
         ),
     )
 

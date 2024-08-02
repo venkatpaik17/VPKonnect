@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timedelta
-from typing import Any
+from functools import wraps
 from uuid import uuid4
 
 from cachetools import TTLCache, keys
@@ -9,7 +9,6 @@ from fastapi.security.oauth2 import OAuth2PasswordBearer
 from jose import ExpiredSignatureError, JWTError, jwt
 
 from app.config.app import settings
-from app.db import session
 from app.schemas import auth as auth_schema
 
 ACCESS_TOKEN_SECRET_KEY = settings.access_token_secret_key
@@ -24,7 +23,7 @@ USER_VERIFY_TOKEN_EXPIRE_MINUTES = settings.user_verify_token_expire_minutes
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
 
-token_blacklist_cache = TTLCache(maxsize=100, ttl=24 * 60 * 60)
+token_blacklist_cache = TTLCache(maxsize=settings.ttlcache_max_size, ttl=24 * 60 * 60)
 
 
 def get_uuid():
@@ -303,7 +302,7 @@ def get_current_user(
         )
 
     # decode refresh token
-    refresh_token_id = decode_token_get_token_id(refresh_token)
+    refresh_token_id = decode_token_get_token_id(token=refresh_token)
     if not refresh_token_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -311,7 +310,7 @@ def get_current_user(
         )
 
     # check refresh token id in the blacklist
-    refresh_token_blacklist_check = is_token_blacklisted(refresh_token_id)
+    refresh_token_blacklist_check = is_token_blacklisted(token=refresh_token_id)
     if refresh_token_blacklist_check:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -325,7 +324,17 @@ def get_current_user(
 
 # access_roles dict
 access_roles = {
-    "management": ["CEO", "CTO", "CMO", "CSO", "CFO", "COO"],
+    "management": [
+        "CEO",
+        "CTO",
+        "CMO",
+        "CSO",
+        "CFO",
+        "COO",
+        "DHR",
+        "DOP",
+        "DOM",
+    ],
     "software_dev": [
         "SDE1F",
         "SDE2F",
@@ -344,6 +353,8 @@ access_roles = {
         "SDM1B",
         "SDM2B",
     ],
+    "hr": ["HR1", "HR2", "HR3", "HRM1", "HRM2"],
+    "content_admin": ["CCA"],
     "content_mgmt": ["CNM", "CMM", "UOA"],
     "busn_govt_user": ["BUS", "GOV"],
     "std_ver_user": ["STD", "VER"],
@@ -371,31 +382,55 @@ access_roles = {
         "SDM2F",
         "SDM1B",
         "SDM2B",
+        "CCA",
         "CNM",
         "CMM",
         "UOA",
+        "HR1",
+        "HR2",
+        "HR3",
+        "HRM1",
+        "HRM2",
+        "DHR",
+        "DOP",
+        "DOM",
     ],
 }
 
 
-# custom dependency to handle access roles
+# custom dependency for role based authorization
 class AccessRoleDependency:
-    def __init__(self, role: str):
+    def __init__(self, role: list[str]):
         self.role = role
 
     def __call__(
         self, current_user: auth_schema.AccessTokenPayload = Depends(get_current_user)
     ):
-        type_desgn = current_user.type
-        if type_desgn not in access_roles[self.role]:
-            # print("1")
-            # print(type_desgn)
+        if not hasattr(current_user, "type"):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to perform requested action",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid user payload",
             )
+        type_desgn = current_user.type
+        # print(type_desgn)
+        # print(self.role)
+        for user_role in self.role:
+            try:
+                if type_desgn in access_roles[user_role]:
+                    # print(access_roles[user_role])
+                    # print(user_role)
+                    return current_user
 
-        return current_user
+            except KeyError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Role configuration is invalid",
+                ) from exc
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access requested resource",
+        )
 
 
 # def get_current_admin(access_token: str = Depends(oauth2_scheme)):
@@ -423,3 +458,41 @@ class AccessRoleDependency:
 #         )
 
 #     return current_user
+
+
+# role based authorization using decorator and wrapper
+def authorize(permitted_roles: list[str]):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            current_user = kwargs.get("current_user") or kwargs.get("current_employee")
+
+            if not current_user:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
+                )
+
+            user_type = getattr(current_user, "type")
+            if not user_type:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid user payload",
+                )
+            for role in permitted_roles:
+                try:
+                    if user_type in access_roles[role]:
+                        return func(*args, **kwargs)
+                except KeyError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Role configuration is invalid",
+                    ) from exc
+
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized to access requested resource",
+            )
+
+        return wrapper
+
+    return decorator

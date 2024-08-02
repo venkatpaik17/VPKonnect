@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    UniqueConstraint,
     and_,
     func,
     text,
@@ -29,10 +30,21 @@ class UserFollowAssociation(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
     )
     follower_user_id = Column(
-        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
+        UUID(as_uuid=True),
+        ForeignKey("user.id", ondelete="CASCADE", nullable=False),
     )
     followed_user_id = Column(
-        UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), primary_key=True
+        UUID(as_uuid=True),
+        ForeignKey("user.id", ondelete="CASCADE", nullable=False),
+    )
+    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
+    UniqueConstraint(
+        "follower_user_id",
+        "followed_user_id",
+        "status",
+        "created_at",
+        name="user_follow_association_follower_followed_status_created_at_key",
     )
     follower = relationship(
         "User", back_populates="following", foreign_keys=[follower_user_id]
@@ -78,9 +90,13 @@ class User(Base):
     repr_id = Column(
         UUID(as_uuid=True),
         nullable=False,
-        server_default=func.gen_random_uuid(),
     )
     inactive_delete_after = Column(Integer, nullable=False, server_default=text("183"))
+    country_phone_code = Column(String(length=10), nullable=True)
+    phone_number = Column(
+        String(length=12),
+        nullable=True,
+    )
 
     followers = relationship(
         "UserFollowAssociation",
@@ -88,6 +104,7 @@ class User(Base):
         primaryjoin=and_(
             id == UserFollowAssociation.followed_user_id,
             UserFollowAssociation.status == "ACP",
+            UserFollowAssociation.is_deleted == False,
         ),
     )
 
@@ -97,12 +114,33 @@ class User(Base):
         primaryjoin=and_(
             id == UserFollowAssociation.follower_user_id,
             UserFollowAssociation.status == "ACP",
+            UserFollowAssociation.is_deleted == False,
         ),
     )
     usernames = relationship("UsernameChangeHistory", back_populates="username_user")
     passwords = relationship("PasswordChangeHistory", back_populates="password_user")
     sessions = relationship("UserSession", back_populates="session_user")
     posts = relationship("Post", back_populates="post_user")
+    # published_posts = relationship(
+    #     "Post",
+    #     primaryjoin="and_(User.id == Post.user_id, Post.status == 'ACP')",
+    #     back_populates="published_post_user",
+    # )
+    # draft_posts = relationship(
+    #     "Post",
+    #     primaryjoin="and_(User.id == Post.user_id, Post.status == 'DRF')",
+    #     back_populates="draft_post_user",
+    # )
+    # banned_posts = relationship(
+    #     "Post",
+    #     primaryjoin="and_(User.id == Post.user_id, and_(Post.status == 'BAN', Post.is_ban_final == False)",
+    #     back_populates="banned_post_user",
+    # )
+    # flagged_to_be_banned_posts = relationship(
+    #     "Post",
+    #     primaryjoin="and_(User.id == Post.user_id, Post.status == 'FLB')",
+    #     back_populates="flagged_post_user",
+    # )
     post_likes = relationship("PostLike", back_populates="post_like_user")
     comments = relationship("Comment", back_populates="comment_user")
     comment_likes = relationship("CommentLike", back_populates="comment_like_user")
@@ -121,6 +159,7 @@ class UsernameChangeHistory(Base):
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
+    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)
     username_user = relationship("User", back_populates="usernames")
 
 
@@ -136,6 +175,7 @@ class PasswordChangeHistory(Base):
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
+    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)
     password_user = relationship("User", back_populates="passwords")
 
 
@@ -154,6 +194,7 @@ class UserSession(Base):
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
     is_active = Column(Boolean, nullable=False, server_default=text("True"))
+    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)
     session_user = relationship("User", back_populates="sessions")
 
 
@@ -177,3 +218,4 @@ class UserAccountHistory(Base):
         nullable=False,
         server_default=text("NOW()"),
     )
+    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)

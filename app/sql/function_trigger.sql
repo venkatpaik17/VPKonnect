@@ -20,114 +20,93 @@ EXECUTE FUNCTION get_age_from_dob();
 CREATE OR REPLACE FUNCTION update_activity_detail()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF TG_NARGS <> 1 THEN
-        RAISE EXCEPTION 'Wrong number of arguments for update_activity_detail()';
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO activity_detail (metric, count, date)
+        VALUES ('Users_Added', 1, NOW())
+        ON CONFLICT (metric, date)
+        DO UPDATE SET count = activity_detail.count + 1;
+    
+    ELSIF TG_OP = 'UPDATE' THEN
+        -- Increment the count for the new status
+        INSERT INTO activity_detail (metric, count, date)
+        VALUES (
+            CASE 
+                WHEN NEW.status = 'ACT' AND OLD.status = 'INA' AND NEW.is_verified = TRUE THEN 'Users_Active'
+                WHEN NEW.status = 'INA' THEN 'Users_Inactive'
+                WHEN NEW.status = 'RSP' THEN 'Users_Restricted_Partial'
+                WHEN NEW.status = 'RSF' THEN 'Users_Restricted_Full'
+                WHEN NEW.status = 'DAH' THEN 'Users_Deactivated'
+                WHEN NEW.status = 'PDH' THEN 'Users_Pending_Delete'
+                WHEN NEW.status = 'TBN' THEN 'Users_Banned_Temp'
+                WHEN NEW.status = 'PBN' THEN 'Users_Banned_Perm'
+                WHEN NEW.status = 'PDI' THEN 'Users_Pending_Delete'
+                WHEN NEW.status = 'PDB' THEN 'Users_Pending_Delete'
+                WHEN NEW.status = 'DEL' AND NEW.is_deleted = TRUE THEN 'Users_Deleted'
+                WHEN NEW.status = 'ACT' AND OLD.status = 'RSP' THEN 'Users_Unrestricted_Partial'
+                WHEN NEW.status = 'ACT' AND OLD.status = 'RSF' THEN 'Users_Unrestricted_Full'
+                WHEN NEW.status = 'ACT' AND OLD.status = 'TBN' THEN 'Users_Unbanned_Temp'
+                WHEN NEW.status = 'ACT' AND OLD.status = 'PBN' THEN 'Users_Unbanned_Perm'
+                WHEN NEW.status = 'ACT' AND OLD.status IN ('DAH', 'INA') THEN 'Users_Reactivated'
+                WHEN NEW.status = 'ACT' AND OLD.status = 'PDH' THEN 'Users_Restored'
+                ELSE NULL
+            END,
+            1, NOW()
+        )
+        ON CONFLICT (metric, date)
+        DO UPDATE SET count = activity_detail.count + 1;
+
+        -- Decrement the count for the old status
+        INSERT INTO activity_detail (metric, count, date)
+        VALUES (
+            CASE 
+                WHEN OLD.status = 'ACT' THEN 'Users_Active'
+                WHEN OLD.status = 'INA' AND OLD.is_verified = TRUE THEN 'Users_Inactive'
+                WHEN OLD.status = 'RSP' THEN 'Users_Restricted_Partial'
+                WHEN OLD.status = 'RSF' THEN 'Users_Restricted_Full'
+                WHEN OLD.status = 'DAH' THEN 'Users_Deactivated'
+                WHEN OLD.status IN ('PDH', 'PDB', 'PDI') THEN 'Users_Pending_Delete'
+                WHEN OLD.status = 'TBN' THEN 'Users_Banned_Temp'
+                WHEN OLD.status = 'PBN' THEN 'Users_Banned_Perm'
+                ELSE NULL
+            END,
+            -1, NOW()
+        )
+        ON CONFLICT (metric, date)
+        DO UPDATE SET count = activity_detail.count - 1;
     END IF;
-
-    INSERT INTO activity_detail (metric, count, date)
-    VALUES (TG_ARGV[0], 1, NOW())
-    ON CONFLICT (metric, date)
-    DO UPDATE SET count = activity_detail.count + 1;
-
+    
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-/*
-trigger upon update
-#updating User_Added trigger
-#instead of ON INSERT it will be ON UPDATE after verification
-*/
-CREATE TRIGGER user_added_activity_detail_trigger
+
+CREATE TRIGGER user_insert_activity_detail_trigger
+AFTER INSERT ON "user"
+FOR EACH ROW
+EXECUTE FUNCTION update_activity_detail();
+
+CREATE TRIGGER user_update_activity_detail_trigger
 AFTER UPDATE OF status ON "user"
 FOR EACH ROW
-WHEN (OLD.status = 'INA' AND NEW.status = 'ACT' AND NEW.is_verified = TRUE)
-EXECUTE FUNCTION update_activity_detail('Users_Added');
-
-CREATE TRIGGER user_inactive_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status IN ('ACT', 'RSP', 'RSF', 'TBN') AND NEW.status = 'INA')
-EXECUTE FUNCTION update_activity_detail('Users_Inactive');
-
-CREATE TRIGGER user_restrict_partial_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status IN ('ACT', 'INA', 'DAH', 'PDH', 'RSF', 'TBN') AND NEW.status = 'RSP')
-EXECUTE FUNCTION update_activity_detail('Users_Restricted_Partial');
-
-CREATE TRIGGER user_restrict_full_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status IN ('ACT', 'INA', 'DAH', 'PDH', 'RSP', 'TBN') AND NEW.status = 'RSF')
-EXECUTE FUNCTION update_activity_detail('Users_Restricted_Full');
-
-CREATE TRIGGER user_deactivate_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status IN ('ACT', 'RSP', 'RSF') AND NEW.status = 'DAH')
-EXECUTE FUNCTION update_activity_detail('Users_Deactivated');
-
-CREATE TRIGGER user_pending_delete_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN ((OLD.status IN ('ACT', 'RSP', 'RSF') AND NEW.status = 'PDH') OR (OLD.status = 'PBN' AND NEW.status = 'PDB') OR (OLD.status = 'INA' AND NEW.status = 'PDI'))
-EXECUTE FUNCTION update_activity_detail('Users_Pending_Delete');
-
-CREATE TRIGGER user_banned_temp_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status IN ('ACT', 'INA', 'RSP', 'RSF', 'DAH', 'PDH') AND NEW.status = 'TBN')
-EXECUTE FUNCTION update_activity_detail('Users_Banned_Temp');
-
-CREATE TRIGGER user_banned_perm_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status IN ('ACT', 'INA', 'RSP', 'RSF', 'DAH', 'PDH', 'TBN') AND NEW.status = 'PBN')
-EXECUTE FUNCTION update_activity_detail('Users_Banned_Perm');
-
-CREATE TRIGGER user_unrestricted_partial_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status = 'RSP' AND NEW.status = 'ACT')
-EXECUTE FUNCTION update_activity_detail('Users_Unrestricted_Partial');
-
-CREATE TRIGGER user_unrestricted_full_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status = 'RSF' AND NEW.status = 'ACT')
-EXECUTE FUNCTION update_activity_detail('Users_Unrestricted_Full');
-
-CREATE TRIGGER user_unbanned_temp_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status = 'TBN' AND NEW.status = 'ACT')
-EXECUTE FUNCTION update_activity_detail('Users_Unbanned_Temp');
-
-CREATE TRIGGER user_unbanned_perm_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status = 'PBN' AND NEW.status = 'ACT')
-EXECUTE FUNCTION update_activity_detail('Users_Unbanned_Perm');
-
-CREATE TRIGGER user_reactivated_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status IN ('DAH', 'INA') AND NEW.status = 'ACT')
-EXECUTE FUNCTION update_activity_detail('Users_Reactivated');
-
-CREATE TRIGGER user_restored_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status 'PDH' AND NEW.status = 'ACT')
-EXECUTE FUNCTION update_activity_detail('Users_Restored');
-
-CREATE TRIGGER user_delete_activity_detail_trigger
-AFTER UPDATE OF status ON "user"
-FOR EACH ROW
-WHEN (OLD.status IN ('PDH', 'PDB', 'PDI') AND NEW.status = 'DEL' AND NEW.is_deleted = TRUE)
-EXECUTE FUNCTION update_activity_detail('Users_Deleted');
-
+WHEN
+    (
+        (OLD.status = 'INA' AND NEW.status = 'ACT' AND NEW.is_verified = TRUE) OR
+        (OLD.status IN ('ACT', 'RSP', 'RSF', 'TBN') AND NEW.status = 'INA') OR
+        (OLD.status IN ('ACT', 'INA', 'DAH', 'PDH', 'RSF', 'TBN') AND NEW.status = 'RSP') OR
+        (OLD.status IN ('ACT', 'INA', 'DAH', 'PDH', 'RSP', 'TBN') AND NEW.status = 'RSF') OR
+        (OLD.status IN ('ACT', 'RSP', 'RSF') AND NEW.status = 'DAH') OR
+        ((OLD.status IN ('ACT', 'RSP', 'RSF') AND NEW.status = 'PDH') OR (OLD.status = 'PBN' AND NEW.status = 'PDB') OR (OLD.status = 'INA' AND NEW.status = 'PDI')) OR
+        (OLD.status IN ('ACT', 'INA', 'RSP', 'RSF', 'DAH', 'PDH') AND NEW.status = 'TBN') OR
+        (OLD.status IN ('ACT', 'INA', 'RSP', 'RSF', 'DAH', 'PDH', 'TBN') AND NEW.status = 'PBN') OR
+        (OLD.status = 'RSP' AND NEW.status = 'ACT') OR
+        (OLD.status = 'RSF' AND NEW.status = 'ACT') OR
+        (OLD.status = 'TBN' AND NEW.status = 'ACT') OR
+        (OLD.status = 'PBN' AND NEW.status = 'ACT') OR
+        (OLD.status IN ('DAH', 'INA') AND NEW.status = 'ACT') OR
+        (OLD.status = 'PDH' AND NEW.status = 'ACT') OR
+        (OLD.status IN ('PDH', 'PDB', 'PDI') AND NEW.status = 'DEL' AND NEW.is_deleted = TRUE)
+    )
+EXECUTE FUNCTION update_activity_detail();
 
 
 /*Based on user logout from one session and logout from all devices*/

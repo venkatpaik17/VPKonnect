@@ -23,7 +23,7 @@ class ActivityDetail(Base):
     id = Column(
         UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
     )
-    metric = Column(String(length=20), nullable=False)
+    metric = Column(String(length=50), nullable=False)
     count = Column(BigInteger, nullable=False, server_default=text("0"))
     date = Column(Date, nullable=False, server_default=func.now())
 
@@ -59,11 +59,16 @@ class UserRestrictBanDetail(Base):
     content_type = Column(String, nullable=False)
     content_id = Column(UUID(as_uuid=True), nullable=False)
     report_id = Column(
-        UUID(as_uuid=True), ForeignKey("user_content_report_detail.id"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("user_content_report_detail.id", ondelete="CASCADE"),
+        nullable=False,
     )
     enforce_action_at = Column(
         TIMESTAMP(timezone=True),
         nullable=True,
+    )
+    is_enforce_action_early = Column(
+        Boolean, nullable=False, server_default=text("False")
     )
 
     post = relationship(
@@ -168,6 +173,11 @@ class UserContentReportDetail(Base):
     reported_user = relationship("User", foreign_keys=[reported_user_id])
     report_reason_user = relationship("User", foreign_keys=[report_reason_user_id])
     moderator = relationship("Employee", foreign_keys=[moderator_id])
+    restrict_ban = relationship(
+        "UserRestrictBanDetail",
+        foreign_keys=[id],
+        primaryjoin="UserContentReportDetail.id==UserRestrictBanDetail.report_id",
+    )
 
 
 class GuidelineViolationScore(Base):
@@ -187,6 +197,7 @@ class GuidelineViolationScore(Base):
     )
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
     # last_added_score = Column(Integer(), nullable=False, server_default=text("0"))
+    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)
 
     last_added_scores = relationship(
         "GuidelineViolationLastAddedScore", back_populates="score"
@@ -210,7 +221,9 @@ class UserContentRestrictBanAppealDetail(Base):
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )
     report_id = Column(
-        UUID(as_uuid=True), ForeignKey("user_content_report_detail.id"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("user_content_report_detail.id", ondelete="CASCADE"),
+        nullable=False,
     )
     content_type = Column(String(), nullable=False)
     content_id = Column(UUID(as_uuid=True), nullable=False)
@@ -218,7 +231,9 @@ class UserContentRestrictBanAppealDetail(Base):
     attachment = Column(String(), nullable=True)
     status = Column(String(length=3), nullable=False, server_default=text("'OPN'"))
     moderator_id = Column(
-        UUID(as_uuid=True), ForeignKey("employee.id", ondelete="CASCADE"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("employee.id", ondelete="CASCADE"),
+        nullable=True,
     )
     moderator_note = Column(String(), nullable=True)
     is_deleted = Column(Boolean(), nullable=False, server_default=text("False"))
@@ -232,6 +247,7 @@ class UserContentRestrictBanAppealDetail(Base):
         nullable=True,
         onupdate=func.now(),
     )
+    is_policy_followed = Column(Boolean(), nullable=True)
 
     post = relationship(
         "Post",
@@ -258,21 +274,25 @@ class UserContentRestrictBanAppealDetail(Base):
         cascade="all, delete-orphan",
     )
 
+    appeal_user = relationship("User", foreign_keys=[user_id])
+    report = relationship("UserContentReportDetail", foreign_keys=[report_id])
+    moderator = relationship("Employee", foreign_keys=[moderator_id])
 
-class AppealRestrictJoinView(Base):
-    __tablename__ = "appeal_restrict_join_view"
-    id = Column(BigInteger(), primary_key=True)
-    user_id = Column(UUID(as_uuid=True))
-    report_id = Column(UUID(as_uuid=True))
-    appeal_content_type = Column(String())
-    appeal_content_id = Column(UUID(as_uuid=True))
-    appeal_status = Column(String(length=3))
-    user_restrict_ban_status = Column(String(length=3))
-    user_restrict_ban_duration = Column(Integer())
-    user_restrict_ban_is_deleted = Column(Boolean())
-    user_restrict_ban_is_active = Column(Boolean())
-    user_restrict_ban_content_type = Column(String())
-    user_restrict_ban_content_id = Column(UUID(as_uuid=True))
+
+# class AppealRestrictJoinView(Base):
+#     __tablename__ = "appeal_restrict_join_view"
+#     id = Column(BigInteger(), primary_key=True)
+#     user_id = Column(UUID(as_uuid=True))
+#     report_id = Column(UUID(as_uuid=True))
+#     appeal_content_type = Column(String())
+#     appeal_content_id = Column(UUID(as_uuid=True))
+#     appeal_status = Column(String(length=3))
+#     user_restrict_ban_status = Column(String(length=3))
+#     user_restrict_ban_duration = Column(Integer())
+#     user_restrict_ban_is_deleted = Column(Boolean())
+#     user_restrict_ban_is_active = Column(Boolean())
+#     user_restrict_ban_content_type = Column(String())
+#     user_restrict_ban_content_id = Column(UUID(as_uuid=True))
 
 
 class GuidelineViolationLastAddedScore(Base):
@@ -328,4 +348,46 @@ class AccountReportFlaggedContent(Base):
         TIMESTAMP(timezone=True),
         nullable=False,
         server_default=text("NOW()"),
+    )
+
+
+class UserContentReportEventTimeline(Base):
+    __tablename__ = "user_content_report_event_timeline"
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.generate_ulid(),
+    )
+    event_type = Column(String(), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    detail = Column(String(), nullable=True)
+    report_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("user_content_report_detail.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+
+class UserContentRestrictBanAppealEventTimeline(Base):
+    __tablename__ = "user_content_restrict_ban_appeal_event_timeline"
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.generate_ulid(),
+    )
+    event_type = Column(String(), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    detail = Column(String(), nullable=True)
+    appeal_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("user_content_restrict_ban_appeal_detail.id", ondelete="CASCADE"),
+        nullable=False,
     )

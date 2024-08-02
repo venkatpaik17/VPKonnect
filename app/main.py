@@ -2,7 +2,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import event
 
@@ -12,6 +12,7 @@ from app.db.db_sqlalchemy import Base, engine
 from app.models import admin, auth, comment, post, user
 from app.utils import event
 from app.utils import job_task as job_task_utils
+from app.utils.exception import CustomValidationError
 
 ENVIRONMENT = settings.app_environment
 SHOW_DOCS_ENVIRONMENT = ("dev", "test")
@@ -40,6 +41,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(CustomValidationError)
+async def custom_validation_exception_handler(request, exc: CustomValidationError):
+    # Return a JSONResponse with the status code and detail
+    return JSONResponse(
+        status_code=exc.status_code,  # Set the status code from the exception
+        content={"detail": exc.detail},  # Set the error detail in the response body
+    )
+
+
 app.include_router(api_routes.router)
 
 scheduler = BackgroundScheduler()
@@ -47,26 +58,31 @@ scheduler = BackgroundScheduler()
 
 @app.on_event("startup")
 def scheduler_init():
-    scheduler.add_job(
-        func=job_task_utils.delete_user_after_deactivation_period_expiration,
-        trigger=IntervalTrigger(seconds=3),
-    )
-    scheduler.add_job(
-        func=job_task_utils.remove_restriction_on_user_after_duration_expiration,
-        trigger=IntervalTrigger(seconds=5),
-    )
-    scheduler.add_job(
-        func=job_task_utils.remove_ban_on_user_after_duration_expiration,
-        trigger=IntervalTrigger(seconds=5),
-    )
-    scheduler.add_job(
-        func=job_task_utils.user_inactivity_inactive,
-        trigger=IntervalTrigger(seconds=3),
-    )
-    scheduler.add_job(
-        func=job_task_utils.user_inactivity_delete,
-        trigger=IntervalTrigger(seconds=3),
-    )
+    # scheduler.add_job(
+    #     func=job_task_utils.delete_user_after_deactivation_period_expiration,
+    #     trigger=IntervalTrigger(seconds=3),
+    # )
+    # scheduler.add_job(
+    #     func=job_task_utils.remove_restriction_on_user_after_duration_expiration,
+    #     trigger=IntervalTrigger(seconds=5),
+    # )
+    # scheduler.add_job(
+    #     func=job_task_utils.remove_ban_on_user_after_duration_expiration,
+    #     trigger=IntervalTrigger(seconds=5),
+    # )
+    # scheduler.add_job(
+    #     func=job_task_utils.user_inactivity_inactive,
+    #     trigger=IntervalTrigger(seconds=3),
+    # )
+    # scheduler.add_job(
+    #     func=job_task_utils.user_inactivity_delete,
+    #     trigger=IntervalTrigger(seconds=3),
+    # )
+    # scheduler.add_job(
+    #     func=job_task_utils.close_appeal_after_duration_limit_expiration,
+    #     trigger=IntervalTrigger(seconds=3),
+    # )
+
     scheduler.start()
 
 

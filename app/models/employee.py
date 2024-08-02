@@ -13,6 +13,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from app.db.db_sqlalchemy import Base
 
@@ -50,7 +51,7 @@ class Employee(Base):
         server_default=text("'ACP'"),
     )
     type = Column(String(length=3), nullable=False)
-    designation = Column(String(), nullable=False)
+    designation = Column(String(length=10), nullable=False)
     supervisor_id = Column(
         UUID(as_uuid=True),
         ForeignKey("employee.id", ondelete="CASCADE"),
@@ -66,6 +67,10 @@ class Employee(Base):
         TIMESTAMP(timezone=True),
         nullable=True,
         onupdate=func.now(),
+    )
+
+    supervisor = relationship(
+        "Employee", remote_side=[id], foreign_keys=[supervisor_id]
     )
 
 
@@ -93,3 +98,4 @@ class EmployeeSession(Base):
         nullable=False,
     )
     is_active = Column(Boolean(), server_default=text("True"), nullable=False)
+    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)

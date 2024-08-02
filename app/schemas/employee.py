@@ -3,6 +3,8 @@ from datetime import date, datetime
 from fastapi import HTTPException, status
 from pydantic import BaseModel, EmailStr, Field, validator
 
+from app.utils.exception import CustomValidationError
+
 
 class EmployeeBase(BaseModel):
     first_name: str = Field(min_length=1, max_length=50)
@@ -12,6 +14,7 @@ class EmployeeBase(BaseModel):
     join_date: date
     type: str
     designation: str
+    supervisor: str | None
 
 
 class EmployeeRegister(EmployeeBase):
@@ -68,19 +71,19 @@ class EmployeeRegister(EmployeeBase):
             if x == 0:
                 return value
             else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                raise CustomValidationError(
+                    status_code=400,
                     detail="Invalid aadhaar number",
                 )
 
         except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+            raise CustomValidationError(
+                status_code=400,
                 detail="Invalid aadhaar number",
             ) from exc
         except IndexError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+            raise CustomValidationError(
+                status_code=400,
                 detail="Invalid aadhaar number",
             ) from exc
 
@@ -98,3 +101,53 @@ class EmployeeOutput(BaseModel):
     emp_id: str
     first_name: str
     last_name: str
+
+
+class AllEmployeesAdminRequest(BaseModel):
+    status: list[str] | None = None
+    type: list[str] | None = None
+    designation: list[str] | None = None
+    sort: str | None = None
+
+
+class SupervisorOutput(BaseModel):
+    emp_id: str
+    first_name: str
+    last_name: str
+    work_email: EmailStr
+    designation: str
+
+    class Config:
+        orm_mode = True
+
+
+class AllEmployeesAdminResponse(BaseModel):
+    profile_picture: str | None
+    emp_id: str
+    first_name: str
+    last_name: str
+    personal_email: EmailStr
+    work_email: EmailStr
+    date_of_birth: date
+    age: int
+    gender: str
+    join_date: date
+    termination_date: date | None
+    type: str
+    designation: str
+    supervisor: SupervisorOutput | None
+    country_phone_code: str
+    phone_number: str
+    aadhaar: str
+    pan: str
+    address_line_1: str
+    address_line_2: str | None = None
+    city: str
+    state_province: str
+    zip_postal_code: str
+    country: str
+    status: str
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
