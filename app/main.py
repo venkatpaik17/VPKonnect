@@ -63,7 +63,7 @@ scheduler = BackgroundScheduler()
 def scheduler_init():
     scheduler.add_job(
         func=job_task_utils.delete_user_after_deactivation_period_expiration,
-        trigger=IntervalTrigger(seconds=3),
+        trigger=IntervalTrigger(seconds=10),
     )
     scheduler.add_job(
         func=job_task_utils.remove_restriction_on_user_after_duration_expiration,
@@ -75,15 +75,27 @@ def scheduler_init():
     )
     scheduler.add_job(
         func=job_task_utils.user_inactivity_inactive,
-        trigger=IntervalTrigger(seconds=3),
+        trigger=IntervalTrigger(seconds=7),
     )
     scheduler.add_job(
         func=job_task_utils.user_inactivity_delete,
-        trigger=IntervalTrigger(seconds=3),
+        trigger=IntervalTrigger(seconds=7),
     )
     scheduler.add_job(
         func=job_task_utils.close_appeal_after_duration_limit_expiration,
         trigger=IntervalTrigger(seconds=3),
+    )
+    scheduler.add_job(
+        func=job_task_utils.delete_user_after_permanent_ban_appeal_limit_expiry,
+        trigger=IntervalTrigger(seconds=3),
+    )
+    scheduler.add_job(
+        func=job_task_utils.delete_content_after_ban_appeal_limit_expiry,
+        trigger=IntervalTrigger(seconds=3),
+    )
+    scheduler.add_job(
+        func=job_task_utils.reduce_violation_score_quarterly,
+        trigger=IntervalTrigger(seconds=10),
     )
 
     scheduler.start()
