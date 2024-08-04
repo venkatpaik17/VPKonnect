@@ -103,11 +103,11 @@ class EmployeeOutput(BaseModel):
     last_name: str
 
 
-class AllEmployeesAdminRequest(BaseModel):
-    status: list[str] | None = None
-    type: list[str] | None = None
-    designation: list[str] | None = None
-    sort: str | None = None
+# class AllEmployeesAdminRequest(BaseModel):
+#     status: list[str] | None = None
+#     type: list[str] | None = None
+#     designation: list[str] | None = None
+#     sort: str | None = None
 
 
 class SupervisorOutput(BaseModel):

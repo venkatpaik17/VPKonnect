@@ -5,8 +5,8 @@ from enum import Enum
 class UserStatusEnum(str, Enum):
     """
     Enum for user status values 'active', 'inactive', 'restricted_partial', 'restricted_full',
-    'deactivated_hide', 'deactivated_keep',  'pending_delete_hide', 'pending_delete_keep',
-    'ban_temporary', 'ban_permanent', 'deleted'
+    'deactivated_hide', 'pending_delete_hide', 'pending_delete_ban', 'pending_delete_inactive',
+    'temporary_ban', 'permanent_ban', 'deleted'
     """
 
     ACTIVE = "ACT"
@@ -14,9 +14,7 @@ class UserStatusEnum(str, Enum):
     RESTRICTED_PARTIAL = "RSP"
     RESTRICTED_FULL = "RSF"
     DEACTIVATED_HIDE = "DAH"
-    DEACTIVATED_KEEP = "DAK"  # to be removed
     PENDING_DELETE_HIDE = "PDH"
-    PENDING_DELETE_KEEP = "PDK"  # to be removed
     PENDING_DELETE_BAN = "PDB"
     PENDING_DELETE_INACTIVE = "PDI"
     TEMPORARY_BAN = "TBN"
@@ -46,7 +44,8 @@ class UserTypeEnum(str, Enum):
 
 class PostStatusEnum(str, Enum):
     """
-    Enum for post status values 'published', 'draft', 'hidden', 'banned', 'deleted'
+    Enum for post status values 'published', 'draft', 'hidden', 'banned', 'removed',
+    'flagged_to_be_banned', 'flagged_deleted'
     """
 
     PUBLISHED = "PUB"
@@ -70,7 +69,8 @@ class PostLikeStatusEnum(str, Enum):
 
 class CommentStatusEnum(str, Enum):
     """
-    Enum for comment status values 'published', 'hidden', 'banned', 'deleted'
+    Enum for comment status values 'published', 'hidden', 'banned', 'removed'
+    'flagged_to_be_banned', 'flagged_deleted'
     """
 
     PUBLISHED = "PUB"
@@ -83,7 +83,7 @@ class CommentStatusEnum(str, Enum):
 
 class CommentLikeStatusEnum(str, Enum):
     """
-    Enum for commentlike status values 'active', 'hidden', 'deleted'
+    Enum for commentlike status values 'active', 'hidden', 'removed'
     """
 
     ACTIVE = "ACT"
@@ -94,6 +94,7 @@ class CommentLikeStatusEnum(str, Enum):
 class UserFollowAssociationStatusEnum(str, Enum):
     """
     Enum for userfollowassociation status values 'accepted', 'rejected', 'pending', 'unfollowed'
+    'removed', 'hidden'
     """
 
     ACCEPTED = "ACP"
@@ -126,7 +127,8 @@ class UserVerificationCodeTokenTypeEnum(str, Enum):
 
 class UserContentReportDetailStatusEnum(str, Enum):
     """
-    Enum for usercontentreportdetail status values 'open', 'under_review', 'closed', 'resolved'
+    Enum for usercontentreportdetail status values 'open', 'under_review', 'future_resolved', 'future_resolved_related'
+    'closed', 'resolved', 'resolved_related'
     """
 
     OPEN = "OPN"
@@ -140,7 +142,8 @@ class UserContentReportDetailStatusEnum(str, Enum):
 
 class UserContentAppealDetailStatusEnum(str, Enum):
     """
-    Enum for usercontentappealdetail status values 'open', 'under_review', 'accepted', 'rejected', 'closed'
+    Enum for usercontentappealdetail status values 'open', 'under_review', 'accepted', 'accepted_related'
+    'rejected', 'rejected_related', 'closed'
     """
 
     OPEN = "OPN"
@@ -154,7 +157,10 @@ class UserContentAppealDetailStatusEnum(str, Enum):
 
 class UserAccountHistoryEventTypeEnum(str, Enum):
     """
-    Enum for useraccounthistory event_type values 'changed', 'removed', 'created', 'deactivated', 'delete_scheduled', 'deleted', 'reactivated', 'restored'
+    Enum for useraccounthistory event_type values 'changed', 'removed', 'created', 'deactivated', 'deactivated_delete_scheduled',
+    'restricted_partial', 'restricted_full', 'banned_permanent', 'banned_temporary', 'inactivated_delete_scheduled',
+    'banned_delete_scheduled', 'deleted', 'reactivated', 'restored', 'unrestricted_partial', 'unrestricted_full'
+    'unbanned_temporary', 'unbanned_permanent'
     """
 
     CHANGED = "CNG"
@@ -212,12 +218,15 @@ class EmployeeAuthTrackStatusEnum(str, Enum):
 class EmployeeDesignationEnum(str, Enum):
     """
     Enum for employee designation values 'chief_executive_officer', 'chief_technology_officer', 'chief_sales_officer',
-    'chief_marketing_officer', 'chief_financial_officer', 'chief_operating_officer', 'software_development_engineer_1_frontend',
-    'software_development_engineer_2_frontend', 'software_development_engineer_3_frontend', 'software_development_engineer_4_frontend',
-    'software_development_engineer_1_backend', 'software_development_engineer_2_backend', 'software_development_engineer_3_backend',
-    'software_development_engineer_4_backend', 'software_development_engineer_test_1', 'software_development_engineer_test_2',
-    'software_development_engineer_test_3', 'software_development_engineer_test_4', 'content_moderator', 'community_moderator',
-    'user_operations_analyst'
+    'chief_marketing_officer', 'chief_financial_officer', 'chief_operating_officer', 'director_of_human_resource',
+    'director_of_products', 'director_of_marketting', 'human_resource_1', 'human_resource_2','human_resource_3',
+    'human_resource_manager_1', 'human_resource_manager_2', 'software_development_engineer_1_frontend', 'software_development_engineer_2_frontend',
+    'software_development_engineer_3_frontend', 'software_development_engineer_4_frontend', 'software_development_manager_1_frontend',
+    'software_development_manager_2_frontend', 'software_development_engineer_1_backend', 'software_development_engineer_2_backend',
+    'software_development_engineer_3_backend', 'software_development_engineer_4_backend', 'software_development_manager_1_backend'
+    'software_development_manager_2_backend', 'software_development_engineer_test_1', 'software_development_engineer_test_2',
+    'software_development_engineer_test_3', 'software_development_engineer_test_4', 'content_community_admin', 'content_moderator',
+    'community_moderator', 'user_operations_analyst'
     """
 
     CHIEF_EXECUTIVE_OFFICER = "CEO"

@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, aliased
 
+from app.config.app import settings
 from app.models import admin as admin_model
 from app.models import user as user_model
 
@@ -92,12 +93,12 @@ def get_user_by_id(
 
 
 def get_all_users_admin(
-    status_in_list: list[str] | None,
+    status: str | None,
     db_session: Session,
     sort: str | None,
 ):
     query = db_session.query(user_model.User).filter(
-        (user_model.User.status.in_(status_in_list)) if status_in_list else True,
+        (user_model.User.status.in_(status)) if status else True,
     )
 
     if sort == "asc":
@@ -234,7 +235,10 @@ def check_deactivation_expiration_for_scheduled_delete(db_session: Session):
             user_model.UserAccountHistory.account_detail_type == "Account",
             user_model.UserAccountHistory.event_type.in_(["DDS", "BDS", "IDS"]),
             func.now()
-            >= (user_model.UserAccountHistory.created_at + timedelta(days=30)),
+            >= (
+                user_model.UserAccountHistory.created_at
+                + timedelta(days=settings.deactivation_delete_expiry_days)
+            ),
             user_model.UserAccountHistory.is_deleted == False,
         )
         .all()

@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -9,8 +10,8 @@ from fastapi import (
     HTTPException,
     Query,
     UploadFile,
-    status,
 )
+from fastapi import status as http_status
 from pydantic import EmailStr
 from pyfa_converter import FormDepends
 from sqlalchemy import desc, func
@@ -37,6 +38,7 @@ from app.utils import auth as auth_utils
 from app.utils import basic as basic_utils
 from app.utils import email as email_utils
 from app.utils import image as image_utils
+from app.utils import map as map_utils
 from app.utils import password as password_utils
 
 router = APIRouter(prefix=settings.api_prefix + "/users", tags=["Users"])
@@ -46,7 +48,7 @@ MAX_SIZE = settings.image_max_size
 image_folder = settings.image_folder
 
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
+@router.post("/register", status_code=http_status.HTTP_201_CREATED)
 def create_user(
     background_tasks: BackgroundTasks,
     request: user_schema.UserRegister = FormDepends(user_schema.UserRegister),  # type: ignore
@@ -75,14 +77,15 @@ def create_user(
 
     if unverified_user:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail=f"User with {unverified_user.email} already registered. Verification Pending.",
         )
 
     # check both entered passwords are same
     if request.password != request.confirm_password:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Passwords do not match"
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match",
         )
 
     del request.confirm_password
@@ -92,13 +95,13 @@ def create_user(
     )
     if username_check:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail=f"Username {request.username} is already taken",
         )
     user_check = user_service.check_user_exists(email=request.email, db_session=db)
     if user_check:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail=f"{request.email} already exists in the system",
         )
 
@@ -147,7 +150,7 @@ def create_user(
         if image and image_path:
             image_utils.remove_image(path=image_path)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error registering user",
         ) from exc
 
@@ -187,13 +190,14 @@ def create_user(
 
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing verification email request for user registration",
         ) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error sending verification email.",
         ) from exc
 
@@ -217,7 +221,7 @@ def send_verification_email_user(
     )
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     email_subject = str()
@@ -240,7 +244,7 @@ def send_verification_email_user(
             or user.is_verified == True
         ):
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=http_status.HTTP_409_CONFLICT,
                 detail="User is already verified",
             )
 
@@ -267,7 +271,7 @@ def send_verification_email_user(
             "PBN",
         ]:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Unable to process your request at this time. Please contact support for assistance.",
             )
 
@@ -301,13 +305,14 @@ def send_verification_email_user(
         email_utils.send_email(email_subject, email_details, background_tasks)
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing email request",
         ) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error sending email.",
         ) from exc
 
@@ -323,7 +328,7 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
     )
     if user_verify_token_blacklist_check:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=http_status.HTTP_401_UNAUTHORIZED,
             detail="User verification failed, Token invalid/revoked",
         )
 
@@ -348,7 +353,7 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
     user = user_query.first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="New user to be verfified and registered not found",
         )
 
@@ -369,7 +374,7 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
 
     if not check_token_id:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User verification failed, Reset token not found",
         )
 
@@ -402,8 +407,9 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
 
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing user verification request",
         ) from exc
 
@@ -418,7 +424,7 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
 @router.post("/password/reset")
 def reset_password(
     background_tasks: BackgroundTasks,
-    user_email: str = Form(),
+    user_email: EmailStr = Form(),
     db: Session = Depends(get_db),
 ):
     reset_user = user_schema.UserPasswordReset(email=user_email)
@@ -428,12 +434,12 @@ def reset_password(
     )
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     if user.status in ("TBN", "PBN"):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Unable to process your request at this time. Please contact support for assistance.",
         )
 
@@ -467,14 +473,15 @@ def reset_password(
         email_utils.send_email(email_subject, email_details, background_tasks)
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing reset password request",
         ) from exc
     except Exception as exc:
         auth_utils.blacklist_token(reset_token)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="There was an error in sending email",
         ) from exc
 
@@ -499,7 +506,8 @@ def change_password_reset(
     # check both entered passwords
     if reset.password != reset.confirm_password:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Passwords do not match"
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match",
         )
 
     del confirm_password
@@ -513,7 +521,7 @@ def change_password_reset(
     )
     if reset_token_blacklist_check:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=http_status.HTTP_401_UNAUTHORIZED,
             detail="Paswword reset failed, Token invalid/revoked",
         )
 
@@ -526,12 +534,12 @@ def change_password_reset(
     user = user_query.first()
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
     if user.status in ("TBN", "PBN"):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Unable to process your request at this time. Please contact support for assistance.",
         )
 
@@ -553,7 +561,7 @@ def change_password_reset(
     )
     if not token_id_check:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Password reset failed, Reset token not found",
         )
 
@@ -594,13 +602,14 @@ def change_password_reset(
 
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing change password request",
         ) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error sending email.",
         ) from exc
 
@@ -608,15 +617,14 @@ def change_password_reset(
 
 
 @router.post("/password/update")
+@auth_utils.authorize(["user"])
 def change_password_update(
     background_tasks: BackgroundTasks,
     old_password: str = Form(),
     new_password: str = Form(),
     confirm_new_password: str = Form(),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     update = user_schema.UserPasswordChangeUpdate(
         old_password=old_password,
@@ -636,7 +644,7 @@ def change_password_update(
     # check both old password and new password
     if update.old_password == update.new_password:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="New password cannot be same as Old Password",
         )
 
@@ -646,13 +654,14 @@ def change_password_update(
     )
     if not old_password_check:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Old password invalid"
+            status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Old password invalid"
         )
 
     # check both newly entered passwords
     if update.new_password != update.confirm_new_password:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Passwords do not match"
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match",
         )
 
     del confirm_new_password
@@ -685,13 +694,14 @@ def change_password_update(
         email_utils.send_email(email_subject, email_details, background_tasks)
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing change password request",
         ) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error sending email.",
         ) from exc
 
@@ -700,12 +710,11 @@ def change_password_update(
 
 # follow/unfollow users
 @router.post("/follow")
+@auth_utils.authorize(["user"])
 def follow_user(
     followed_user: user_schema.UserFollow,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get the user to be followed
     user_followed = user_service.get_user_by_username(
@@ -715,19 +724,19 @@ def follow_user(
     )
     if not user_followed:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User to be followed not found",
         )
 
     if user_followed.status in ("DAH", "PDH"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User profile to be followed not found",
         )
 
     if user_followed.status == "PBN":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="User to be followed is banned, cannot access profile",
         )
 
@@ -741,14 +750,14 @@ def follow_user(
     # RSF cannot follow
     if follower_user.status == "RSF":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Cannot follow/unfollow other user, user is under full restriction",
         )
 
     # user cannot follow/unfollow him/herself
     if followed_user.username == follower_user.username:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="User cannot follow/unfollow itself",
         )
 
@@ -765,7 +774,7 @@ def follow_user(
             # check if already follows the user
             if follower_user.username in following_usernames:
                 raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
+                    status_code=http_status.HTTP_409_CONFLICT,
                     detail=f"You already are following {user_followed.username}",
                 )
 
@@ -782,7 +791,7 @@ def follow_user(
                 )
                 if check_request_sent.first():
                     raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
+                        status_code=http_status.HTTP_409_CONFLICT,
                         detail="Follow request is already sent",
                     )
 
@@ -809,7 +818,7 @@ def follow_user(
             # check if follows the user
             if follower_user.username not in following_usernames:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail=f"You are not following {user_followed.username}",
                 )
             # get user follow entry query
@@ -821,7 +830,7 @@ def follow_user(
             )
             if not user_follow_query.first():
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=http_status.HTTP_404_NOT_FOUND,
                     detail="User follow entry not found",
                 )
 
@@ -837,8 +846,9 @@ def follow_user(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing follow/unfollow user request",
         ) from exc
 
@@ -847,13 +857,12 @@ def follow_user(
 
 # accept/reject follow request
 @router.put("/follow/requests/{username}")
+@auth_utils.authorize(["user"])
 def manage_follow_request(
     username: str,
     follow_request: user_schema.UserFollowRequest,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # check for user using username
     follower_user = user_service.get_user_by_username(
@@ -863,16 +872,16 @@ def manage_follow_request(
     )
     if not follower_user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Follower user not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Follower user not found"
         )
     if follower_user.status in ("DAH", "PDH"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Follower user profile not found",
         )
     if follower_user.status == "PBN":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Follower user is banned, cannot access profile",
         )
 
@@ -892,7 +901,8 @@ def manage_follow_request(
     )
     if not user_follow_query.first():
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User follow entry not found"
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="User follow entry not found",
         )
 
     message = None
@@ -926,8 +936,9 @@ def manage_follow_request(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing accept/reject follow requests",
         ) from exc
 
@@ -939,13 +950,12 @@ def manage_follow_request(
     "/{username}/follow",
     response_model=list[user_schema.UserFollowersFollowingResponse],
 )
+@auth_utils.authorize(["user"])
 def get_user_followers_following(
     username: str,
-    request_info: user_schema.UserFollowersFollowing,
+    fetch: Literal["followers", "following"] = Query(),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
     # can't use Depends(auth_utils.check_access_role(role="user")) because Depends doesn't support extra params directly
     # hence we have a custom dependency class which will set the role param and call the get_current_user function
 ):
@@ -957,17 +967,17 @@ def get_user_followers_following(
     )
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     if user.status in ("DAH", "PDH"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User profile not found",
         )
 
     if user.status == "PBN":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="User is banned, cannot access profile",
         )
 
@@ -985,7 +995,7 @@ def get_user_followers_following(
 
     if (username != curr_auth_user.username) and (user.account_visibility == "PRV" and not follower_check):  # type: ignore
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
 
@@ -1000,7 +1010,7 @@ def get_user_followers_following(
         following_association.followed.username
         for following_association in curr_auth_user.following
     )
-    if request_info.fetch == "followers":
+    if fetch == "followers":
         user_followers = (
             follower_association.follower for follower_association in user.followers
         )
@@ -1033,7 +1043,7 @@ def get_user_followers_following(
 
         return followers_list
 
-    elif request_info.fetch == "following":
+    elif fetch == "following":
         user_following = (
             following_association.followed for following_association in user.following
         )
@@ -1068,7 +1078,7 @@ def get_user_followers_following(
 
     else:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Error processing request. Invalid fetch",
         )
 
@@ -1078,11 +1088,10 @@ def get_user_followers_following(
     "/follow/requests",
     response_model=list[user_schema.UserGetFollowRequestsResponse],
 )
+@auth_utils.authorize(["user"])
 def get_follow_requests(
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
     curr_auth_user = user_service.get_user_by_email(
@@ -1123,12 +1132,11 @@ def get_follow_requests(
 
 # remove a follower
 @router.put("/follow/remove/{username}")
+@auth_utils.authorize(["user"])
 def remove_follower(
     username: str,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get user from username
     follower_user = user_service.get_user_by_username(
@@ -1136,18 +1144,18 @@ def remove_follower(
     )
     if not follower_user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Follower user not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Follower user not found"
         )
 
     if follower_user.status in ("DAH", "PDH"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Follower user profile not found",
         )
 
     if follower_user.status == "PBN":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Follower user is banned, cannot access profile",
         )
 
@@ -1168,7 +1176,8 @@ def remove_follower(
     user_follow_entry = user_follow_entry_query.first()
     if not user_follow_entry:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User follow entry not found"
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="User follow entry not found",
         )
 
     try:
@@ -1185,8 +1194,9 @@ def remove_follower(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing remove follower request",
         ) from exc
 
@@ -1197,12 +1207,11 @@ def remove_follower(
 
 # update username
 @router.post("/username/change")
+@auth_utils.authorize(["user"])
 def username_change(
     new_username: str = Form(),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     update = user_schema.UserUsernameChange(new_username=new_username)
 
@@ -1217,7 +1226,7 @@ def username_change(
     # check if new username matches old username
     if update.new_username == curr_auth_user.username:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="New username cannot be same as old username",
         )
 
@@ -1227,7 +1236,7 @@ def username_change(
     )
     if username_exists:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail=f"Username {update.new_username} is already taken",
         )
 
@@ -1247,8 +1256,9 @@ def username_change(
 
     except SQLAlchemyError as exc:
         db.rollback()
+        print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing username change request",
         ) from exc
 
@@ -1257,12 +1267,11 @@ def username_change(
 
 # get user profile
 @router.get("/{username}/profile")
+@auth_utils.authorize(["user"])
 def user_profile(
     username: str,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get the user from username
     user = user_service.get_user_by_username(
@@ -1272,15 +1281,15 @@ def user_profile(
     )
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     elif user.status in ("DAH", "PDH"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User profile not found"
         )
     elif user.status == "PBN":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="User is banned, cannot access profile",
         )
 
@@ -1340,16 +1349,21 @@ def user_profile(
 @router.get(
     "/{username}/posts",
 )
+@auth_utils.authorize(["user"])
 def get_all_user_posts(
     username: str,
-    posts_request: user_schema.UserPostRequest,
+    status: Literal["published", "draft", "banned", "flagged_banned"] = Query(),
     limit: int = Query(1, le=12),
     last_post_id: UUID = Query(None),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
+    # transform status
+    try:
+        post_status = map_utils.transform_status(value=status)
+    except HTTPException as exc:
+        raise exc
+
     # get the user from username
     user = user_service.get_user_by_username(
         username=username,
@@ -1358,15 +1372,15 @@ def get_all_user_posts(
     )
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     elif user.status in ("DAH", "PDH"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User profile not found"
         )
     elif user.status == "PBN":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="User is banned, cannot access profile",
         )
 
@@ -1386,16 +1400,16 @@ def get_all_user_posts(
         if user.account_visibility == "PRV" and not follower_check:
             return {"message": "This profile is private. Follow to see their posts."}
 
-        elif posts_request.post_status in ("DRF", "FLB", "BAN"):
+        elif post_status in ("DRF", "FLB", "BAN"):
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to access requested resource",
             )
 
     # get the posts
     all_posts = post_service.get_all_posts_profile(
         profile_user_id=user.id,
-        status=posts_request.post_status,
+        status=post_status,
         limit=limit,
         last_post_id=last_post_id,
         db_session=db,
@@ -1440,7 +1454,6 @@ def user_feed(
     limit: int = Query(1, le=10),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
-
     # get current user
     curr_auth_user = user_service.get_user_by_email(
         email=str(current_user.email),
@@ -1503,14 +1516,13 @@ def user_feed(
 
 # deactivate/soft-delete the user account
 @router.patch("/{action}")
+@auth_utils.authorize(["user"])
 def deactivate_or_soft_delete_user(
     action: str,
     background_tasks: BackgroundTasks,
     password: str = Form(None),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
     curr_auth_user_query = user_service.get_user_by_email_query(
@@ -1523,7 +1535,7 @@ def deactivate_or_soft_delete_user(
     # check for password in the request
     if not password:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Password required"
+            status_code=http_status.HTTP_400_BAD_REQUEST, detail="Password required"
         )
 
     # create object
@@ -1536,7 +1548,7 @@ def deactivate_or_soft_delete_user(
     )
     if not password_check:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
+            status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
         )
 
     message = None
@@ -1573,7 +1585,7 @@ def deactivate_or_soft_delete_user(
             message = f"Your account deletion request is accepted. @{curr_auth_user.username} account will be deleted after a deactivation period of 30 days. An email for the same has been sent to {user.email}"
         else:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="Error processing request",
             )
 
@@ -1581,7 +1593,7 @@ def deactivate_or_soft_delete_user(
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing deactivate/delete user request",
         ) from exc
     except HTTPException as exc:
@@ -1590,7 +1602,7 @@ def deactivate_or_soft_delete_user(
         print(exc)
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing deactivate/delete user request",
         ) from exc
 
@@ -1611,7 +1623,7 @@ def deactivate_or_soft_delete_user(
 #     # check if password is entered or not
 #     if not password:
 #         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST, detail="Password required"
+#             status_code=http_status.HTTP_400_BAD_REQUEST, detail="Password required"
 #         )
 
 #     # create deactivation object
@@ -1624,7 +1636,7 @@ def deactivate_or_soft_delete_user(
 #     user = user_query.first()
 #     if not user:
 #         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+#             status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
 #         )
 
 #     if user.status in [
@@ -1634,7 +1646,7 @@ def deactivate_or_soft_delete_user(
 #         "PDK",
 #     ]:
 #         raise HTTPException(
-#             status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found"
+#             status_code=http_status.HTTP_404_NOT_FOUND, detail="User profile not found"
 #         )
 
 #     # check if password is right
@@ -1643,13 +1655,13 @@ def deactivate_or_soft_delete_user(
 #     )
 #     if not password_check:
 #         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
+#             status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
 #         )
 
 #     # check user identity
 #     if username != user.username:
 #         raise HTTPException(
-#             status_code=status.HTTP_403_FORBIDDEN,
+#             status_code=http_status.HTTP_403_FORBIDDEN,
 #             detail="Not authorized to perform requested action",
 #         )
 
@@ -1671,13 +1683,12 @@ def deactivate_or_soft_delete_user(
 
 
 # report an item
-@router.post("/item/report")
+@router.post("/report")
+@auth_utils.authorize(["user"])
 def report_item(
     reported_item: user_schema.UserContentReport,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # check if item is there or not
     if reported_item.item_type == "post":
@@ -1686,16 +1697,16 @@ def report_item(
         )
         if not post:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
+                status_code=http_status.HTTP_404_NOT_FOUND, detail="Post not found"
             )
         if post.status == "BAN":
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Post already banned",
             )
         if post.status == "FLB":
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Reported post already flagged to be banned",
             )
 
@@ -1705,16 +1716,16 @@ def report_item(
         )
         if not comment:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
+                status_code=http_status.HTTP_404_NOT_FOUND, detail="Comment not found"
             )
         if comment.status == "BAN":
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Comment already banned",
             )
         if comment.status == "FLB":
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Reported comment already flagged to be banned",
             )
 
@@ -1731,16 +1742,16 @@ def report_item(
     )
     if not reported_user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Reported user not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Reported user not found"
         )
     if reported_user.status in ("DAH", "PDH"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Reported user profile not found",
         )
     if reported_user.status == "PBN":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Reported user is already permanently banned",
         )
 
@@ -1757,24 +1768,24 @@ def report_item(
             )
             if not report_reason_user:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=http_status.HTTP_404_NOT_FOUND,
                     detail="Original user of impersonating user not found",
                 )
             if report_reason_user.status in ("DAH", "PDH"):
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=http_status.HTTP_404_NOT_FOUND,
                     detail="Original user profile of impersonating user not found",
                 )
             if reported_user.status == "PBN":
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
                     detail="Original user of impersonating user is already permanently banned",
                 )
 
     # user cannot report his/her own item
     if reporter_user.username == reported_user.username:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="User cannot report own content",
         )
 
@@ -1808,7 +1819,7 @@ def report_item(
         print(exc)
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error proccesing report item request",
         ) from exc
 
@@ -1838,7 +1849,7 @@ def appeal_content(
         )
         if not appeal_user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Appeal user not restricted/banned or maybe deleted",
             )
 
@@ -1847,7 +1858,7 @@ def appeal_content(
         # check if 21 days appeal limit is crossed, status for this is PDB
         if appeal_user.status == "PDB":
             raise HTTPException(
-                status_code=status.HTTP_410_GONE,
+                status_code=http_status.HTTP_410_GONE,
                 detail="Your account has been permanently deleted because it did not follow our community guidelines. This decision cannot be reversed either because we have already reviewed it, or because 30 days have passed since your account was permanently banned.",
             )
 
@@ -1858,7 +1869,7 @@ def appeal_content(
         )
         if not restrict_ban_entry:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Appeal user active restrict/ban entry not found",
             )
 
@@ -1880,7 +1891,7 @@ def appeal_content(
         )
         if previous_rejected_appeal:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Request to appeal this account has been denied. Further appeals are not permitted after a previous rejection",
             )
 
@@ -1894,7 +1905,8 @@ def appeal_content(
         )
         if not appeal_user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Appeal user not found"
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Appeal user not found",
             )
 
         # check if 28 days appeal limit is crossed or not
@@ -1903,14 +1915,18 @@ def appeal_content(
                 db.query(post_model.Post)
                 .filter(
                     post_model.Post.id == appeal_user_request.content_id,
-                    func.now() >= (post_model.Post.updated_at + timedelta(days=28)),
+                    func.now()
+                    >= (
+                        post_model.Post.updated_at
+                        + timedelta(days=settings.content_appeal_submit_limit_days)
+                    ),
                     post_model.Post.is_deleted == False,
                 )
                 .first()
             )
             if post_appeal_submit_limit_expiry:
                 raise HTTPException(
-                    status_code=status.HTTP_410_GONE,
+                    status_code=http_status.HTTP_410_GONE,
                     detail="This post is permanently banned and cannot be appealed for review. This decision cannot be reversed because 28 days have passed since your post was banned.",
                 )
 
@@ -1920,14 +1936,17 @@ def appeal_content(
                 .filter(
                     comment_model.Comment.id == appeal_user_request.content_id,
                     func.now()
-                    >= (comment_model.Comment.updated_at + timedelta(days=28)),
+                    >= (
+                        comment_model.Comment.updated_at
+                        + timedelta(days=settings.content_appeal_submit_limit_days)
+                    ),
                     comment_model.Comment.is_deleted == False,
                 )
                 .first()
             )
             if comment_appeal_submit_limit_expiry:
                 raise HTTPException(
-                    status_code=status.HTTP_410_GONE,
+                    status_code=http_status.HTTP_410_GONE,
                     detail="This comment is permanently banned and cannot be appealed for review. This decision cannot be reversed because 28 days have passed since your comment was banned.",
                 )
 
@@ -1940,7 +1959,7 @@ def appeal_content(
             )
             if not banned_post:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=http_status.HTTP_404_NOT_FOUND,
                     detail="Appealed post not banned",
                 )
 
@@ -1952,12 +1971,13 @@ def appeal_content(
             )
             if not banned_comment:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=http_status.HTTP_404_NOT_FOUND,
                     detail="Appealed comment not banned",
                 )
         else:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid content type"
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail="Invalid content type",
             )
 
         # check if any previous rejected appeal for post/comment appealed here associated with same report
@@ -1970,7 +1990,7 @@ def appeal_content(
         )
         if previous_rejected_appeal:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail=f"Request to appeal this {appeal_user_request.content_type} has been denied. Further appeals are not permitted after a previous rejection",
             )
 
@@ -1990,7 +2010,7 @@ def appeal_content(
             )
             if not flagged_content_entry:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=http_status.HTTP_404_NOT_FOUND,
                     detail="Report associated with appeal content not found",
                 )
 
@@ -2004,14 +2024,14 @@ def appeal_content(
             )
             if not resolved_flagged_content_entry:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=http_status.HTTP_404_NOT_FOUND,
                     detail="Report associated with appeal content not found",
                 )
 
             report_entry = resolved_flagged_content_entry
     else:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid content type"
+            status_code=http_status.HTTP_400_BAD_REQUEST, detail="Invalid content type"
         )
 
     ban_report_id = uuid4()
@@ -2057,7 +2077,7 @@ def appeal_content(
         if attachment and image_path:
             image_utils.remove_image(path=image_path)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error submitting appeal",
         ) from exc
 
@@ -2067,7 +2087,7 @@ def appeal_content(
 
 
 # for internal jobs involving bans only
-@router.post("/send_ban_mail")
+@router.post("/send-ban-mail")
 def send_ban_mail(
     email_parameters: admin_schema.UserSendBanEmail,
     background_tasks: BackgroundTasks,
@@ -2103,7 +2123,7 @@ def send_ban_mail(
         print("Error in sending mail", exc)
 
 
-@router.post("/send_delete_mail")
+@router.post("/send-delete-mail")
 def send_delete_mail(
     email_request: admin_schema.UserSendDeleteEmail,
     background_tasks: BackgroundTasks,

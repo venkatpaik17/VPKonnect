@@ -1,15 +1,9 @@
 from datetime import date, timedelta
 from math import floor
+from typing import Literal
 
-from fastapi import (
-    APIRouter,
-    BackgroundTasks,
-    Depends,
-    Form,
-    HTTPException,
-    Query,
-    status,
-)
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query
+from fastapi import status as http_status
 from pydantic import EmailStr
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
@@ -32,6 +26,7 @@ from app.utils import auth as auth_utils
 from app.utils import email as email_utils
 from app.utils import map as map_utils
 from app.utils import operation as operation_utils
+from app.utils.exception import CustomValidationError
 
 router = APIRouter(prefix=settings.api_prefix + "/admin", tags=["Admin"])
 
@@ -41,13 +36,29 @@ router = APIRouter(prefix=settings.api_prefix + "/admin", tags=["Admin"])
     "/reports/dashboard",
     response_model=list[admin_schema.AllReportResponse],
 )
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def get_reports_dashboard(
-    report_request: admin_schema.AllReportRequest,
+    status: (
+        Literal[
+            "open",
+            "closed",
+            "review",
+            "resolved",
+            "future_resolved",
+        ]
+        | None
+    ) = Query(None),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_admin", "content_mgmt"])
+        auth_utils.get_current_user
     ),
 ):
+    # transform report status
+    try:
+        report_status = map_utils.transform_status(value=status) if status else ["OPN"]
+    except HTTPException as exc:
+        raise exc
+
     # get curr employee
     curr_moderator_employee = employee_service.get_employee_by_work_email(
         work_email=str(current_employee.email),
@@ -57,7 +68,7 @@ def get_reports_dashboard(
 
     # get reports based on status and moderator
     all_reports = admin_service.get_all_reports_by_status_moderator_id_reported_at(
-        status_in_list=report_request.report_status,
+        status_in_list=report_status,
         moderator_id=curr_moderator_employee.id,
         reported_at=None,
         db_session=db,
@@ -79,30 +90,61 @@ def get_reports_dashboard(
 
 
 @router.get(
-    "/reports/admin_dashboard", response_model=list[admin_schema.AllReportResponse]
+    "/reports/admin-dashboard", response_model=list[admin_schema.AllReportResponse]
 )
+@auth_utils.authorize(["content_admin"])
 def get_reports_admin_dashboard(
-    get_reports_request: admin_schema.AllReportRequestAdmin,
+    type_: Literal["new", "assigned"] = Query(),
+    status: (
+        Literal[
+            "open",
+            "closed",
+            "review",
+            "resolved",
+            "future_resolved",
+        ]
+        | None
+    ) = Query(None),
+    emp_id: str = Query(None),
+    reported_at: date = Query(None, description="date format YYYY-MM-DD"),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_admin"])
+        auth_utils.get_current_user
     ),
 ):
+    # check parameters
+    if status != "open" and type_ == "new":
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid value: {type_} for status: {status}",
+        )
+    if type_ == "new" and emp_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid value: {emp_id} for type: {type_}",
+        )
+
+    # transform report status
+    try:
+        report_status = map_utils.transform_status(value=status) if status else ["OPN"]
+    except HTTPException as exc:
+        raise exc
+
     moderator = None
-    if get_reports_request.emp_id:
+    if emp_id:
         moderator = employee_service.get_employee_by_emp_id(
-            emp_id=get_reports_request.emp_id,
+            emp_id=emp_id,
             status_not_in_list=["SUP", "TER"],
             db_session=db,
         )
 
     # fetch all reports
     all_reports = admin_service.get_all_reports_by_status_moderator_id_reported_at(
-        status_in_list=get_reports_request.status,
+        status_in_list=report_status,
         db_session=db,
         moderator_id=moderator.id if moderator else None,
-        reported_at=get_reports_request.reported_at,
-        _type=get_reports_request.type,
+        reported_at=reported_at,
+        type_=type_,
     )
 
     if not all_reports:
@@ -121,229 +163,14 @@ def get_reports_admin_dashboard(
     return all_reports_response
 
 
-# get all other open reports related to a particular content report
-@router.get(
-    "/reports/{case_number}/related",
-    response_model=list[admin_schema.AllReportResponse],
-)
-def get_all_related_open_reports_for_specific_report(
-    case_number: int,
-    report_request: admin_schema.ReportOpenRelated,
-    db: Session = Depends(get_db),
-    current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
-    ),
-):
-    # get current employee
-    curr_employee = employee_service.get_employee_by_work_email(
-        work_email=str(current_employee.email),
-        status_not_in_list=["SUP", "TER"],
-        db_session=db,
-    )
-
-    if report_request.admin_dashboard:
-        specific_report = admin_service.get_a_report(
-            case_number=case_number,
-            status_in_list=["OPN"],
-            db_session=db,
-        )
-        if not specific_report:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Specific report not found",
-            )
-        if specific_report.moderator_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="This specific report is already assigned",
-            )
-        moderator_id = None
-
-    else:
-        moderator_id = curr_employee.id
-        # get the report using case_number (OPN or URV, sometimes we may need to check OPN reports for a URV report too)
-        specific_report = admin_service.get_a_report(
-            case_number=case_number,
-            status_in_list=["OPN", "URV"],
-            db_session=db,
-        )
-        if not specific_report:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Specific report not found",
-            )
-        if not specific_report.moderator_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to perform requested action. Report is not assigned by admin",
-            )
-
-    # get other reports
-    all_other_reports = admin_service.get_open_reports_for_specific_content_report(
-        case_number=specific_report.case_number,
-        reported_item_id=specific_report.reported_item_id,
-        reported_item_type=specific_report.reported_item_type,
-        report_reason=None,
-        report_reason_user=specific_report.report_reason_user_id,
-        db_session=db,
-        moderator_id=moderator_id,
-    )
-
-    if not all_other_reports:
-        return []
-
-    # loop through the list of UserContentReportDetail objects and get required params
-    # create response object
-    all_other_reports_response = [
-        admin_schema.AllReportResponse(
-            case_number=report.case_number,
-            status=report.status,
-            reported_at=report.created_at,
-        )
-        for report in all_other_reports
-    ]
-
-    return all_other_reports_response
-
-
-@router.patch("/reports/{case_number}/close")
-def close_report(
-    case_number: int,
-    close_request: admin_schema.CloseReport,
-    db: Session = Depends(get_db),
-    current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
-    ),
-):
-    # get current employee
-    curr_employee = employee_service.get_employee_by_work_email(
-        work_email=str(current_employee.email),
-        status_not_in_list=["SUP", "TER"],
-        db_session=db,
-    )
-
-    # get the report from case number
-    report_query = admin_service.get_a_report_query(
-        case_number=case_number, status_in_list=["CSD", "URV"], db_session=db
-    )
-    report = report_query.first()
-    if not report:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Report to be taken action on, not found",
-        )
-
-    if report.moderator_id != curr_employee.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to perform requested action",
-        )
-
-    if report.status == "CSD":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Report is already closed"
-        )
-
-    # if there are any OPN related report(s) which were not noticed before, put it/them under review and consider it/them in this action request
-    # get open related reports
-    open_related_reports_to_be_reviewed = (
-        admin_service.get_open_reports_for_specific_content_report(
-            case_number=case_number,
-            reported_item_id=report.reported_item_id,
-            reported_item_type=report.reported_item_type,
-            report_reason=report.report_reason,
-            report_reason_user=report.report_reason_user_id,
-            db_session=db,
-            moderator_id=report.moderator_id,
-        )
-    )
-    # get case numbers of the open related reports if any
-    open_related_reports_put_under_review_message = None
-
-    # get other related reports with same report reason, if any then update the status and moderator_note of the related reports same as the report
-    related_reports_query = admin_service.get_related_reports_for_specific_report_query(
-        case_number=case_number,
-        reported_user_id=str(report.reported_user_id),
-        reported_item_id=str(report.reported_item_id),
-        reported_item_type=report.reported_item_type,
-        status="URV",
-        moderator_id=curr_employee.id,
-        db_session=db,
-    )
-    related_reports_same_reason_query = related_reports_query.filter(
-        admin_model.UserContentReportDetail.report_reason == report.report_reason
-    )
-    related_reports_same_reason = related_reports_same_reason_query.all()
-
-    try:
-        # update the report
-        report_query.update(
-            {"status": "CSD", "moderator_note": close_request.moderator_note},
-            synchronize_session=False,
-        )
-
-        # open related reports if any
-        if open_related_reports_to_be_reviewed:
-            open_related_reports_case_numbers = [
-                related_report.case_number
-                for related_report in open_related_reports_to_be_reviewed
-            ]
-            if open_related_reports_case_numbers:
-                valid_reports = selected_reports_under_review_update(
-                    reports_request=admin_schema.ReportUnderReviewUpdate(
-                        case_number_list=open_related_reports_case_numbers
-                    ),
-                    db=db,
-                    current_employee=current_employee,
-                    is_func_call=True,
-                )
-
-                open_related_reports_put_under_review_message = f"Additional {len(valid_reports)} related report(s), case number(s): {valid_reports} was/were put under review and was/were processed in this close request"
-
-        # related reports
-        if related_reports_same_reason:
-            for related_report in related_reports_same_reason:
-                related_report.status = "CSD"
-                related_report.moderator_note = close_request.moderator_note
-
-        db.commit()
-    except SQLAlchemyError as exc:
-        db.rollback()
-        print(exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing close report request",
-        ) from exc
-
-    moderator_note_full = map_utils.create_violation_moderator_notes(
-        username=close_request.reported_username,
-        moderator_note=close_request.moderator_note,
-        case_number=case_number,
-        content_type=report.reported_item_type,
-        report_reason=report.report_reason,
-    )
-
-    message = f"Request processed successfully. No action taken. Report case number {case_number} closed."
-    if open_related_reports_put_under_review_message:
-        return {
-            "message": message,
-            "detail": moderator_note_full,
-            "additional_message": open_related_reports_put_under_review_message,
-        }
-
-    return {
-        "message": message,
-        "detail": moderator_note_full,
-    }
-
-
 # get a report
 @router.get("/reports/{case_number}")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def get_requested_report(
     case_number: int,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
+        auth_utils.get_current_user
     ),
 ):
     # get the report
@@ -352,7 +179,7 @@ def get_requested_report(
     )
     if not requested_report:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Report not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Report not found"
         )
 
     # for account type and status RSD/RSR/FRS/FRR, we need to fetch the flagged/banned posts
@@ -368,7 +195,7 @@ def get_requested_report(
         )
         if not flagged_banned_posts:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Flagged/Banned posts associated with account report not found",
             )
 
@@ -438,13 +265,100 @@ def get_requested_report(
     return admin_schema.ReportResponse.parse_obj(requested_report_data)
 
 
+# get all other open reports related to a particular content report
+@router.get(
+    "/reports/{case_number}/related",
+    response_model=list[admin_schema.AllReportResponse],
+)
+@auth_utils.authorize(["content_admin", "content_mgmt"])
+def get_all_related_open_reports_for_specific_report(
+    case_number: int,
+    admin: bool = Query(),
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.get_current_user
+    ),
+):
+    # get current employee
+    curr_employee = employee_service.get_employee_by_work_email(
+        work_email=str(current_employee.email),
+        status_not_in_list=["SUP", "TER"],
+        db_session=db,
+    )
+
+    if admin:
+        specific_report = admin_service.get_a_report(
+            case_number=case_number,
+            status_in_list=["OPN"],
+            db_session=db,
+        )
+        if not specific_report:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Specific report not found",
+            )
+        if specific_report.moderator_id:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="This specific report is already assigned",
+            )
+        moderator_id = None
+
+    else:
+        moderator_id = curr_employee.id
+        # get the report using case_number (OPN or URV, sometimes we may need to check OPN reports for a URV report too)
+        specific_report = admin_service.get_a_report(
+            case_number=case_number,
+            status_in_list=["OPN", "URV"],
+            db_session=db,
+        )
+        if not specific_report:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Specific report not found",
+            )
+        if not specific_report.moderator_id:
+            raise HTTPException(
+                status_code=http_status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to perform requested action. Report is not assigned by admin",
+            )
+
+    # get other reports
+    all_other_reports = admin_service.get_open_reports_for_specific_content_report(
+        case_number=specific_report.case_number,
+        reported_item_id=specific_report.reported_item_id,
+        reported_item_type=specific_report.reported_item_type,
+        report_reason=None,
+        report_reason_user=specific_report.report_reason_user_id,
+        db_session=db,
+        moderator_id=moderator_id,
+    )
+
+    if not all_other_reports:
+        return []
+
+    # loop through the list of UserContentReportDetail objects and get required params
+    # create response object
+    all_other_reports_response = [
+        admin_schema.AllReportResponse(
+            case_number=report.case_number,
+            status=report.status,
+            reported_at=report.created_at,
+        )
+        for report in all_other_reports
+    ]
+
+    return all_other_reports_response
+
+
 # select reports to review
 @router.patch("/reports/review")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def selected_reports_under_review_update(
     reports_request: admin_schema.ReportUnderReviewUpdate,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
+        auth_utils.get_current_user
     ),
     is_func_call: bool = False,
 ):
@@ -485,7 +399,7 @@ def selected_reports_under_review_update(
         db.rollback()
         print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing select reports review/assign request",
         ) from exc
 
@@ -517,11 +431,12 @@ def selected_reports_under_review_update(
 
 
 @router.patch("/reports/assign")
+@auth_utils.authorize(["content_admin"])
 def selected_reports_assign_update(
     reports_request: admin_schema.ReportAssignUpdate,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_admin"])
+        auth_utils.get_current_user
     ),
 ):
     # get current employee
@@ -539,7 +454,7 @@ def selected_reports_assign_update(
     )
     if not moderator:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Moderator to be assigned to a report not found",
         )
 
@@ -573,7 +488,7 @@ def selected_reports_assign_update(
         db.rollback()
         print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing select reports assign request",
         ) from exc
 
@@ -601,15 +516,147 @@ def selected_reports_assign_update(
     }
 
 
+@router.patch("/reports/{case_number}/close")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
+def close_report(
+    case_number: int,
+    close_request: admin_schema.CloseReport,
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.get_current_user
+    ),
+):
+    # get current employee
+    curr_employee = employee_service.get_employee_by_work_email(
+        work_email=str(current_employee.email),
+        status_not_in_list=["SUP", "TER"],
+        db_session=db,
+    )
+
+    # get the report from case number
+    report_query = admin_service.get_a_report_query(
+        case_number=case_number, status_in_list=["CSD", "URV"], db_session=db
+    )
+    report = report_query.first()
+    if not report:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Report to be taken action on, not found",
+        )
+
+    if report.moderator_id != curr_employee.id:
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to perform requested action",
+        )
+
+    if report.status == "CSD":
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT, detail="Report is already closed"
+        )
+
+    # if there are any OPN related report(s) which were not noticed before, put it/them under review and consider it/them in this action request
+    # get open related reports
+    open_related_reports_to_be_reviewed = (
+        admin_service.get_open_reports_for_specific_content_report(
+            case_number=case_number,
+            reported_item_id=report.reported_item_id,
+            reported_item_type=report.reported_item_type,
+            report_reason=report.report_reason,
+            report_reason_user=report.report_reason_user_id,
+            db_session=db,
+            moderator_id=report.moderator_id,
+        )
+    )
+    open_related_reports_put_under_review_message = None
+
+    # get other related reports with same report reason, if any then update the status and moderator_note of the related reports same as the report
+    related_reports_query = admin_service.get_related_reports_for_specific_report_query(
+        case_number=case_number,
+        reported_user_id=str(report.reported_user_id),
+        reported_item_id=str(report.reported_item_id),
+        reported_item_type=report.reported_item_type,
+        status="URV",
+        moderator_id=curr_employee.id,
+        db_session=db,
+    )
+    related_reports_same_reason_query = related_reports_query.filter(
+        admin_model.UserContentReportDetail.report_reason == report.report_reason
+    )
+    related_reports_same_reason = related_reports_same_reason_query.all()
+
+    try:
+        # update the report
+        report_query.update(
+            {"status": "CSD", "moderator_note": close_request.moderator_note},
+            synchronize_session=False,
+        )
+
+        # open related reports if any
+        if open_related_reports_to_be_reviewed:
+            open_related_reports_case_numbers = [
+                related_report.case_number
+                for related_report in open_related_reports_to_be_reviewed
+            ]
+            if open_related_reports_case_numbers:
+                valid_reports = selected_reports_under_review_update(
+                    reports_request=admin_schema.ReportUnderReviewUpdate(
+                        case_number_list=open_related_reports_case_numbers
+                    ),
+                    db=db,
+                    current_employee=current_employee,
+                    is_func_call=True,
+                )
+
+                open_related_reports_put_under_review_message = f"Additional {len(valid_reports)} related report(s), case number(s): {valid_reports} was/were put under review and was/were processed in this close request"
+
+        # related reports
+        if related_reports_same_reason:
+            for related_report in related_reports_same_reason:
+                related_report.status = "CSD"
+                related_report.moderator_note = close_request.moderator_note
+
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(exc)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing close report request",
+        ) from exc
+
+    moderator_note_full = map_utils.create_violation_moderator_notes(
+        username=report.reported_user.username,
+        moderator_note=close_request.moderator_note,
+        case_number=case_number,
+        content_type=report.reported_item_type,
+        report_reason=report.report_reason,
+    )
+
+    message = f"Request processed successfully. No action taken. Report case number {case_number} closed."
+    if open_related_reports_put_under_review_message:
+        return {
+            "message": message,
+            "detail": moderator_note_full,
+            "additional_message": open_related_reports_put_under_review_message,
+        }
+
+    return {
+        "message": message,
+        "detail": moderator_note_full,
+    }
+
+
 # violation enforcement action algorithm, we use this only for post, comment and message reports
 # for account reports, use manual action
 @router.post("/reports/action/auto")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def enforce_report_action_auto(
     action_request: admin_schema.EnforceReportActionAuto,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
+        auth_utils.get_current_user
     ),
 ):
     # get current employee
@@ -628,34 +675,34 @@ def enforce_report_action_auto(
     report = report_query.first()
     if not report:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Report to be taken action on, not found",
         )
     if report.moderator_id != curr_employee.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
     if report.status == "OPN":
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Report should be under review for action to be taken",
         )
     elif report.status == "CSD":
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Report to be taken action on, is closed",
         )
     elif report.status in ("FRR", "FRS", "RSD", "RSR"):
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Action has been already taken on this report",
         )
 
     # check if the content exists or not
     if report.reported_item_type == "account":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Requested action cannot be performed. Please use Manual Action",
         )
 
@@ -668,16 +715,17 @@ def enforce_report_action_auto(
         post = post_query.first()
         if not post:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Reported post not found"
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Reported post not found",
             )
         if post.status == "BAN":
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Reported post already banned",
             )
         if post.status == "FLB":
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Reported post already flagged to be banned",
             )
 
@@ -690,17 +738,17 @@ def enforce_report_action_auto(
         comment = comment_query.first()
         if not comment:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Reported comment not found",
             )
         if comment.status == "BAN":
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Reported comment already banned",
             )
         if comment.status == "FLB":
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Reported comment already flagged to be banned",
             )
 
@@ -713,11 +761,11 @@ def enforce_report_action_auto(
     reported_user = reported_user_query.first()
     if not reported_user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     if reported_user.status == "PBN":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Reported user is permanently banned",
         )
 
@@ -768,12 +816,13 @@ def enforce_report_action_auto(
     )
     if not severity_group:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Severity group not found"
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Severity group not found",
         )
 
     if severity_group == "CMD":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Requested action cannot be performed. Please use Manual Action",
         )
 
@@ -781,14 +830,16 @@ def enforce_report_action_auto(
     severity_score = map_utils.severity_groups_scores_dict.get(severity_group)
     if not severity_score:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Severity score not found"
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Severity score not found",
         )
 
     # map content type to weights
     content_weight = map_utils.content_weigths_dict.get(report.reported_item_type)
     if not content_weight:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Content weight not found"
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Content weight not found",
         )
 
     # fetch the current final violation score
@@ -800,7 +851,7 @@ def enforce_report_action_auto(
     user_guideline_violation_score = user_guideline_violation_score_query.first()
     if not user_guideline_violation_score:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User guideline violation score entry not found",
         )
 
@@ -829,7 +880,7 @@ def enforce_report_action_auto(
 
         if violation_status == "UND":
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="No action found"
+                status_code=http_status.HTTP_404_NOT_FOUND, detail="No action found"
             )
         elif violation_status == "NA":
             no_action = True
@@ -1057,14 +1108,14 @@ def enforce_report_action_auto(
         print(exc)
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing enforce action request",
         ) from exc
     except Exception as exc:
         print(exc)
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error sending email.",
         ) from exc
 
@@ -1092,12 +1143,13 @@ def enforce_report_action_auto(
 # use this mainly for account reports
 # can also be used for other content types if need be
 @router.post("/reports/action/manual")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def enforce_report_action_manual(
     action_request: admin_schema.EnforceReportActionManual,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
+        auth_utils.get_current_user
     ),
 ):
     # get current employee
@@ -1116,22 +1168,22 @@ def enforce_report_action_manual(
     report = report_query.first()
     if not report:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Report to be taken action on, not found",
         )
     if report.moderator_id != curr_employee.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
     if report.status == "CSD":
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Report to be taken action on, is closed",
         )
     elif report.status in ("FRR", "FRS", "RSD", "RSR"):
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Action has been already taken on this report",
         )
 
@@ -1145,16 +1197,17 @@ def enforce_report_action_manual(
         post = post_query.first()
         if not post:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Reported post not found"
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail="Reported post not found",
             )
         if post.status == "BAN":
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Reported post already banned",
             )
         if post.status == "FLB":
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Reported post already flagged to be banned",
             )
 
@@ -1167,17 +1220,17 @@ def enforce_report_action_manual(
         comment = comment_query.first()
         if not comment:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Reported comment not found",
             )
         if comment.status == "BAN":
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Reported comment already banned",
             )
         if comment.status == "FLB":
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Reported comment already flagged to be banned",
             )
 
@@ -1191,11 +1244,11 @@ def enforce_report_action_manual(
     reported_user = reported_user_query.first()
     if not reported_user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     if reported_user.status == "PBN":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Reported user is permanently banned",
         )
 
@@ -1245,7 +1298,7 @@ def enforce_report_action_manual(
     )
     if not min_req_violation_score:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Minimum required violation score not found",
         )
 
@@ -1258,7 +1311,7 @@ def enforce_report_action_manual(
     user_guideline_violation_score = user_guideline_violation_score_query.first()
     if not user_guideline_violation_score:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="User guideline violation score entry not found",
         )
 
@@ -1385,7 +1438,7 @@ def enforce_report_action_manual(
             # if all the flagegd posts are not found then we need to raise the exception for moderator to look up account again
             if number_of_posts_not_found == number_of_flagged_posts_request:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=http_status.HTTP_404_NOT_FOUND,
                     detail="All posts flagged to be banned not found",
                 )
 
@@ -1550,14 +1603,14 @@ def enforce_report_action_manual(
         db.rollback()
         print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing enforce action request",
         ) from exc
     except Exception as exc:
         print(exc)
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error sending email.",
         ) from exc
 
@@ -1585,30 +1638,61 @@ def enforce_report_action_manual(
 
 # reports admin dashboard
 @router.get(
-    "/appeals/admin_dashboard", response_model=list[admin_schema.AllAppealResponse]
+    "/appeals/admin-dashboard", response_model=list[admin_schema.AllAppealResponse]
 )
+@auth_utils.authorize(["content_admin"])
 def get_appeals_admin_dashboard(
-    get_appeals_request: admin_schema.AllAppealRequestAdmin,
+    type_: Literal["new", "assigned"] = Query(),
+    status: (
+        Literal[
+            "open",
+            "closed",
+            "review",
+            "accepted",
+            "rejected",
+        ]
+        | None
+    ) = Query(None),
+    emp_id: str = Query(None),
+    reported_at: date = Query(None, description="date format YYYY-MM-DD"),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_admin"])
+        auth_utils.get_current_user
     ),
 ):
+    # check parameters
+    if status != "open" and type_ == "new":
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid value: {type_} for status: {status}",
+        )
+    if type_ == "new" and emp_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid value: {emp_id} for type: {type_}",
+        )
+
+    # transform report status
+    try:
+        appeal_status = map_utils.transform_status(value=status) if status else ["OPN"]
+    except HTTPException as exc:
+        raise exc
+
     moderator = None
-    if get_appeals_request.emp_id:
+    if emp_id:
         moderator = employee_service.get_employee_by_emp_id(
-            emp_id=get_appeals_request.emp_id,
+            emp_id=emp_id,
             status_not_in_list=["SUP", "TER"],
             db_session=db,
         )
 
     # fetch all appeals
     all_appeals = admin_service.get_all_appeals_by_status_moderator_id_reported_at(
-        status_in_list=get_appeals_request.status,
+        status_in_list=appeal_status,
         db_session=db,
         moderator_id=moderator.id if moderator else None,
-        reported_at=get_appeals_request.reported_at,
-        _type=get_appeals_request.type,
+        reported_at=reported_at,
+        type_=type_,
     )
 
     if not all_appeals:
@@ -1631,13 +1715,29 @@ def get_appeals_admin_dashboard(
     "/appeals/dashboard",
     response_model=list[admin_schema.AllAppealResponse],
 )
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def get_appeals_dashboard(
-    appeal_request: admin_schema.AllAppealRequest,
+    status: (
+        Literal[
+            "open",
+            "closed",
+            "review",
+            "accepted",
+            "rejected",
+        ]
+        | None
+    ) = Query(None),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
+        auth_utils.get_current_user
     ),
 ):
+    # transform report status
+    try:
+        appeal_status = map_utils.transform_status(value=status) if status else ["OPN"]
+    except HTTPException as exc:
+        raise exc
+
     # get curr employee
     curr_moderator_employee = employee_service.get_employee_by_work_email(
         work_email=str(current_employee.email),
@@ -1647,36 +1747,81 @@ def get_appeals_dashboard(
 
     # get appeals based on status and moderator
     all_appeals = admin_service.get_all_appeals_by_status_moderator_id_reported_at(
-        status_in_list=appeal_request.appeal_status,
+        status_in_list=appeal_status,
         moderator_id=curr_moderator_employee.id,
         reported_at=None,
         db_session=db,
     )
 
-    all_appeals_response = None
-    if all_appeals:
-        all_appeals_response = [
-            admin_schema.AllAppealResponse(
-                case_number=report.case_number,
-                status=report.status,
-                appealed_at=report.created_at,
-            )
-            for report in all_appeals
-        ]
+    if not all_appeals:
+        return []
+
+    all_appeals_response = [
+        admin_schema.AllAppealResponse(
+            case_number=report.case_number,
+            status=report.status,
+            appealed_at=report.created_at,
+        )
+        for report in all_appeals
+    ]
 
     return all_appeals_response
+
+
+@router.get("/appeals/{case_number}")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
+def get_requested_appeal(
+    case_number: int,
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.get_current_user
+    ),
+):
+    # get the appeal
+    requested_appeal = admin_service.get_an_appeal(
+        case_number=case_number, status_in_list=None, db_session=db
+    )
+    if not requested_appeal:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Appeal not found"
+        )
+
+    # we create the dict and then parse it using overriding parse_obj function on AppealResponse schema
+    requested_appeal_data = {
+        "case_number": requested_appeal.case_number,
+        "appeal_user": requested_appeal.appeal_user.__dict__,
+        "report": requested_appeal.report.__dict__,
+        "content_type": requested_appeal.content_type,
+        "appealed_content": (
+            (requested_appeal.post.__dict__ if requested_appeal.post else None)
+            or (requested_appeal.comment.__dict__ if requested_appeal.comment else None)
+            or requested_appeal.account.__dict__
+        ),
+        "appeal_detail": requested_appeal.appeal_detail,
+        "attachment": requested_appeal.attachment,
+        "status": requested_appeal.status,
+        "moderator_note": requested_appeal.moderator_note,
+        "moderator": (
+            requested_appeal.moderator.__dict__ if requested_appeal.moderator else None
+        ),
+        "appealed_at": requested_appeal.created_at,
+        "last_updated_at": requested_appeal.updated_at,
+    }
+
+    return admin_schema.AppealResponse.parse_obj(requested_appeal_data)
 
 
 @router.get(
     "/appeals/{case_number}/related",
     response_model=list[admin_schema.AllAppealResponse],
 )
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def get_all_related_open_appeals_for_specific_appeal(
     case_number: int,
-    appeal_request: admin_schema.AppealOpenRelated,
+    admin: bool = Query(),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
+        auth_utils.get_current_user
     ),
 ):
     # get current employee
@@ -1686,16 +1831,16 @@ def get_all_related_open_appeals_for_specific_appeal(
         db_session=db,
     )
 
-    if appeal_request.admin_dashboard:
+    if admin:
         specific_appeal = admin_service.get_an_appeal(case_number, ["OPN"], db)
         if not specific_appeal:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Specific appeal not found",
             )
         if specific_appeal.moderator_id:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=http_status.HTTP_409_CONFLICT,
                 detail="This specific appeal is already assigned",
             )
         moderator_id = None
@@ -1706,12 +1851,12 @@ def get_all_related_open_appeals_for_specific_appeal(
         specific_appeal = admin_service.get_an_appeal(case_number, ["OPN", "URV"], db)
         if not specific_appeal:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail="Specific appeal not found",
             )
         if not specific_appeal.moderator_id:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to perform requested action. Appeal is not assigned by admin",
             )
 
@@ -1739,12 +1884,173 @@ def get_all_related_open_appeals_for_specific_appeal(
     return all_other_appeals_response
 
 
-@router.post("/appeals/{case_number}/check_policy")
+# select appeals to review
+@router.patch("/appeals/review")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
+def selected_appeals_under_review_update(
+    appeals_request: admin_schema.AppealUnderReviewUpdate,
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.get_current_user
+    ),
+    is_func_call: bool = False,
+):
+    # get current employee
+    curr_employee = employee_service.get_employee_by_work_email(
+        work_email=str(current_employee.email),
+        status_not_in_list=["SUP", "TER"],
+        db_session=db,
+    )
+
+    # check if each appeal to be marked for review exists or not, are they open are not
+    # update the valid appeals
+    valid_appeals = []
+    invalid_appeals = []
+    already_urv_appeals = []
+    messages = []
+    errors = []
+    for case_no in appeals_request.case_number_list:
+        get_appeal_query = admin_service.get_an_appeal_query(
+            case_no, ["OPN", "URV"], db
+        )
+        get_appeal = get_appeal_query.first()
+        if (
+            not get_appeal
+            or not get_appeal.moderator_id
+            or get_appeal.moderator_id != curr_employee.id
+        ):
+            invalid_appeals.append(case_no)
+        elif get_appeal.status == "URV":
+            already_urv_appeals.append(case_no)
+        else:
+            get_appeal_query.update(
+                {"status": "URV"},
+                synchronize_session=False,
+            )
+            valid_appeals.append(case_no)
+
+    db.commit()
+
+    if is_func_call:
+        return valid_appeals
+
+    # if not func call
+    if valid_appeals:
+        messages.append(
+            f"{len(valid_appeals)} appeal(s), case number(s): {valid_appeals} is/are marked for review"
+        )
+    else:
+        messages.append("No valid appeals to mark for review")
+
+    if invalid_appeals:
+        errors.append(
+            f"{len(invalid_appeals)} appeal(s), case number(s): {invalid_appeals} could not be marked for review due to internal error. These appeal(s) might already be closed/resolved by concerned moderators"
+        )
+
+    if already_urv_appeals:
+        errors.append(
+            f"{len(already_urv_appeals)} appeal(s), case number(s): {already_urv_appeals} is/are already under review"
+        )
+
+    return {
+        "message": " ".join(messages),
+        "error": "\n".join(errors) if errors else None,
+    }
+
+
+# select appeals to assign
+@router.patch("/appeals/assign")
+@auth_utils.authorize(["content_admin"])
+def selected_appeals_assign_update(
+    appeals_request: admin_schema.AppealAssignUpdate,
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.get_current_user
+    ),
+):
+    # get current employee
+    curr_employee = employee_service.get_employee_by_work_email(
+        work_email=str(current_employee.email),
+        status_not_in_list=["SUP", "TER"],
+        db_session=db,
+    )
+
+    # get the moderator to be assigned
+    moderator = employee_service.get_employee_by_emp_id(
+        emp_id=appeals_request.moderator_emp_id,
+        status_not_in_list=["SUP", "TER"],
+        db_session=db,
+    )
+    if not moderator:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Moderator to be assigned to an appeal not found",
+        )
+
+    # check if each appeal to be assigned exists or not, are they open are not
+    # update the valid appeals
+    valid_appeals = []
+    invalid_appeals = []
+    already_assign_appeals = []
+    messages = []
+    errors = []
+    for case_no in appeals_request.case_number_list:
+        get_appeal_query = admin_service.get_an_appeal_query(
+            case_number=case_no, status_in_list=["OPN"], db_session=db
+        )
+        get_appeal = get_appeal_query.first()
+        if not get_appeal:
+            invalid_appeals.append(case_no)
+        elif get_appeal.moderator_id:
+            already_assign_appeals.append(case_no)
+        else:
+            get_appeal_query.update(
+                {"moderator_id": moderator.id},
+                synchronize_session=False,
+            )
+            valid_appeals.append(case_no)
+
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(exc)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing select appeals assign request",
+        ) from exc
+
+    # if not func call
+    if valid_appeals:
+        messages.append(
+            f"{len(valid_appeals)} appeal(s), case number(s): {valid_appeals} is/are assigned to {moderator.id}"
+        )
+    else:
+        messages.append("No valid appeals to mark for review")
+
+    if invalid_appeals:
+        errors.append(
+            f"{len(invalid_appeals)} appeal(s), case number(s): {invalid_appeals} could not be assigned to {moderator.id} due to internal error. These appeal(s) might already be closed/resolved by concerned moderators"
+        )
+
+    if already_assign_appeals:
+        errors.append(
+            f"{len(already_assign_appeals)} appeal(s), case number(s): {already_assign_appeals} is/are already assigned to a moderator"
+        )
+
+    return {
+        "message": " ".join(messages),
+        "error": "\n".join(errors) if errors else None,
+    }
+
+
+@router.patch("/appeals/{case_number}/check-policy")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def check_appeal_policy(
     case_number: int,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
+        auth_utils.get_current_user
     ),
 ):
     # get current employee
@@ -1762,26 +2068,26 @@ def check_appeal_policy(
     )
     if not appeal_entry:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Appeal entry not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Appeal entry not found"
         )
     if appeal_entry.moderator_id != curr_employee.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
     if appeal_entry.status == "OPN":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Appeal should be Under Review before policy check",
         )
     if appeal_entry.status in ("ACP", "ACR", "REJ", "RJR"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Policy check is already done and action has been already taken on this appeal",
         )
     if appeal_entry.status == "CSD":
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Invalid policy check",
         )
 
@@ -1791,7 +2097,7 @@ def check_appeal_policy(
     ).first()
     if not report_entry:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Report associated with restrict/ban appeal not found",
         )
 
@@ -1886,13 +2192,14 @@ def check_appeal_policy(
     return {"message": message, "detail": detail}
 
 
-@router.post("/appeals/{case_number}/close")
+@router.patch("/appeals/{case_number}/close")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def close_appeal(
     case_number: int,
     close_request: admin_schema.CloseAppeal,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
+        auth_utils.get_current_user
     ),
 ):
     # get current employee
@@ -1906,22 +2213,18 @@ def close_appeal(
     appeal = admin_service.get_an_appeal(case_number, ["CSD", "URV"], db)
     if not appeal:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Appeal to be taken action on, not found",
         )
     if appeal.moderator_id != curr_employee.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
     if appeal.status == "CSD":
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Appeal is already closed"
+            status_code=http_status.HTTP_409_CONFLICT, detail="Appeal is already closed"
         )
-
-    # update the appeal
-    appeal.status = "CSD"
-    appeal.moderator_note = close_request.moderator_note
 
     # if there are any OPN related appeal(s) which were not noticed before, put it/them under review and consider it/them in this action request
     # get open related appeals
@@ -1935,25 +2238,6 @@ def close_appeal(
         )
     )
 
-    # get case numbers of the open related appeals if any
-    open_related_appeals_put_under_review_message = None
-    if open_related_appeals_to_be_reviewed:
-        open_related_appeals_case_numbers = [
-            related_appeal.case_number
-            for related_appeal in open_related_appeals_to_be_reviewed
-        ]
-        if open_related_appeals_case_numbers:
-            valid_appeals = selected_appeals_under_review_update(
-                appeals_request=admin_schema.AppealUnderReviewUpdate(
-                    case_number_list=open_related_appeals_case_numbers
-                ),
-                db=db,
-                current_employee=current_employee,
-                is_func_call=True,
-            )
-
-            open_related_appeals_put_under_review_message = f"Additional {len(valid_appeals)} related appeal(s), case number(s): {valid_appeals} was/were put under review and was/were processed in this close request"
-
     # get other related appeals if any then update the status and moderator_note of the related appeals same as the appeal
     related_appeals = admin_service.get_related_appeals_for_specific_appeal(
         case_number=case_number,
@@ -1964,21 +2248,54 @@ def close_appeal(
         db_session=db,
     ).all()
 
-    if related_appeals:
-        for related_report in related_appeals:
-            related_report.status = "CSD"
-            related_report.moderator_note = close_request.moderator_note
+    open_related_appeals_put_under_review_message = None
 
-    db.commit()
+    try:
+        # update the appeal
+        appeal.status = "CSD"
+        appeal.moderator_note = close_request.moderator_note
+
+        if open_related_appeals_to_be_reviewed:
+            open_related_appeals_case_numbers = [
+                related_appeal.case_number
+                for related_appeal in open_related_appeals_to_be_reviewed
+            ]
+            if open_related_appeals_case_numbers:
+                valid_appeals = selected_appeals_under_review_update(
+                    appeals_request=admin_schema.AppealUnderReviewUpdate(
+                        case_number_list=open_related_appeals_case_numbers
+                    ),
+                    db=db,
+                    current_employee=current_employee,
+                    is_func_call=True,
+                )
+
+                open_related_appeals_put_under_review_message = f"Additional {len(valid_appeals)} related appeal(s), case number(s): {valid_appeals} was/were put under review and was/were processed in this close request"
+
+        if related_appeals:
+            for related_report in related_appeals:
+                related_report.status = "CSD"
+                related_report.moderator_note = close_request.moderator_note
+
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        print(exc)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing close appeal request",
+        ) from exc
 
     moderator_note_full = map_utils.create_appeal_moderator_notes(
-        username=close_request.appeal_username,
+        username=appeal.appeal_user.username,
         moderator_note=close_request.moderator_note,
         case_number=case_number,
         content_type=appeal.content_type,
     )
 
-    message = f"Request processed successfully. No action taken. Report case number {case_number} closed."
+    message = (
+        f"Request processed successfully. Appeal case number {case_number} closed."
+    )
     if open_related_appeals_put_under_review_message:
         return {
             "message": message,
@@ -1992,213 +2309,14 @@ def close_appeal(
     }
 
 
-@router.get("/appeals/{case_number}")
-def get_requested_appeal(
-    case_number: int,
-    db: Session = Depends(get_db),
-    current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
-    ),
-):
-    # get the appeal
-    requested_appeal = admin_service.get_an_appeal(
-        case_number=case_number, status_in_list=None, db_session=db
-    )
-    if not requested_appeal:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Appeal not found"
-        )
-
-    # we create the dict and then parse it using overriding parse_obj function on AppealResponse schema
-    requested_appeal_data = {
-        "case_number": requested_appeal.case_number,
-        "appeal_user": requested_appeal.appeal_user.__dict__,
-        "report": requested_appeal.report.__dict__,
-        "content_type": requested_appeal.content_type,
-        "appealed_content": (
-            (requested_appeal.post.__dict__ if requested_appeal.post else None)
-            or (requested_appeal.comment.__dict__ if requested_appeal.comment else None)
-            or requested_appeal.account.__dict__
-        ),
-        "appeal_detail": requested_appeal.appeal_detail,
-        "attachment": requested_appeal.attachment,
-        "status": requested_appeal.status,
-        "moderator_note": requested_appeal.moderator_note,
-        "moderator": (
-            requested_appeal.moderator.__dict__ if requested_appeal.moderator else None
-        ),
-        "appealed_at": requested_appeal.created_at,
-        "last_updated_at": requested_appeal.updated_at,
-    }
-
-    return admin_schema.AppealResponse.parse_obj(requested_appeal_data)
-
-
-# select appeals to review
-@router.patch("/appeals/review")
-def selected_appeals_under_review_update(
-    appeals_request: admin_schema.AppealUnderReviewUpdate,
-    db: Session = Depends(get_db),
-    current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
-    ),
-    is_func_call: bool = False,
-):
-    # get current employee
-    curr_employee = employee_service.get_employee_by_work_email(
-        work_email=str(current_employee.email),
-        status_not_in_list=["SUP", "TER"],
-        db_session=db,
-    )
-
-    # check if each appeal to be marked for review exists or not, are they open are not
-    # update the valid appeals
-    valid_appeals = []
-    invalid_appeals = []
-    already_urv_appeals = []
-    messages = []
-    errors = []
-    for case_no in appeals_request.case_number_list:
-        get_appeal_query = admin_service.get_an_appeal_query(
-            case_no, ["OPN", "URV"], db
-        )
-        get_appeal = get_appeal_query.first()
-        if (
-            not get_appeal
-            or not get_appeal.moderator_id
-            or get_appeal.moderator_id != curr_employee.id
-        ):
-            invalid_appeals.append(case_no)
-        elif get_appeal.status == "URV":
-            already_urv_appeals.append(case_no)
-        else:
-            get_appeal_query.update(
-                {"status": "URV"},
-                synchronize_session=False,
-            )
-            valid_appeals.append(case_no)
-
-    db.commit()
-
-    if is_func_call:
-        return valid_appeals
-
-    # if not func call
-    if valid_appeals:
-        messages.append(
-            f"{len(valid_appeals)} appeal(s), case number(s): {valid_appeals} is/are marked for review"
-        )
-    else:
-        messages.append("No valid appeals to mark for review")
-
-    if invalid_appeals:
-        errors.append(
-            f"{len(invalid_appeals)} appeal(s), case number(s): {invalid_appeals} could not be marked for review due to internal error. These appeal(s) might already be closed/resolved by concerned moderators"
-        )
-
-    if already_urv_appeals:
-        errors.append(
-            f"{len(already_urv_appeals)} appeal(s), case number(s): {already_urv_appeals} is/are already under review"
-        )
-
-    return {
-        "message": " ".join(messages),
-        "error": "\n".join(errors) if errors else None,
-    }
-
-
-# select appeals to assign
-@router.patch("/appeals/assign")
-def selected_appeals_assign_update(
-    appeals_request: admin_schema.AppealAssignUpdate,
-    db: Session = Depends(get_db),
-    current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
-    ),
-):
-    # get current employee
-    curr_employee = employee_service.get_employee_by_work_email(
-        work_email=str(current_employee.email),
-        status_not_in_list=["SUP", "TER"],
-        db_session=db,
-    )
-
-    # get the moderator to be assigned
-    moderator = employee_service.get_employee_by_emp_id(
-        emp_id=appeals_request.moderator_emp_id,
-        status_not_in_list=["SUP", "TER"],
-        db_session=db,
-    )
-    if not moderator:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Moderator to be assigned to an appeal not found",
-        )
-
-    # check if each appeal to be assigned exists or not, are they open are not
-    # update the valid appeals
-    valid_appeals = []
-    invalid_appeals = []
-    already_assign_appeals = []
-    messages = []
-    errors = []
-    for case_no in appeals_request.case_number_list:
-        get_appeal_query = admin_service.get_an_appeal_query(
-            case_number=case_no, status_in_list=["OPN"], db_session=db
-        )
-        get_appeal = get_appeal_query.first()
-        if not get_appeal:
-            invalid_appeals.append(case_no)
-        elif get_appeal.moderator_id:
-            already_assign_appeals.append(case_no)
-        else:
-            get_appeal_query.update(
-                {"moderator_id": moderator.id},
-                synchronize_session=False,
-            )
-            valid_appeals.append(case_no)
-
-    try:
-        db.commit()
-    except SQLAlchemyError as exc:
-        db.rollback()
-        print(exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing select appeals assign request",
-        ) from exc
-
-    # if not func call
-    if valid_appeals:
-        messages.append(
-            f"{len(valid_appeals)} appeal(s), case number(s): {valid_appeals} is/are assigned to {moderator.id}"
-        )
-    else:
-        messages.append("No valid appeals to mark for review")
-
-    if invalid_appeals:
-        errors.append(
-            f"{len(invalid_appeals)} appeal(s), case number(s): {invalid_appeals} could not be assigned to {moderator.id} due to internal error. These appeal(s) might already be closed/resolved by concerned moderators"
-        )
-
-    if already_assign_appeals:
-        errors.append(
-            f"{len(already_assign_appeals)} appeal(s), case number(s): {already_assign_appeals} is/are already assigned to a moderator"
-        )
-
-    return {
-        "message": " ".join(messages),
-        "error": "\n".join(errors) if errors else None,
-    }
-
-
 # api endpoint for appeal accept
 @router.post("/appeals/action")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
 def appeal_action(
     action_request: admin_schema.AppealAction,
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["content_mgmt"])
+        auth_utils.get_current_user
     ),
 ):
     # get current employee
@@ -2216,12 +2334,13 @@ def appeal_action(
     )
     if not appeal_user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Appeal user not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Appeal user not found"
         )
 
     if appeal_user.status == "INA":
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Invalid appeal user status"
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Invalid appeal user status",
         )
 
     # get appeal
@@ -2232,35 +2351,35 @@ def appeal_action(
     )
     if not appeal_entry:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Appeal to be taken action on, not found",
         )
     if appeal_entry.moderator_id != curr_employee.id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
 
     if appeal_entry.status == "OPN":
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Appeal should be under review for action to be taken",
         )
     elif appeal_entry.status == "CSD":
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Appeal to be taken action on, is closed",
         )
     elif appeal_entry.status in ("ACP", "ACR", "REJ", "RJR"):
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
+            status_code=http_status.HTTP_409_CONFLICT,
             detail="Action has been already taken on this appeal",
         )
 
     # check policy done or not
     if appeal_entry.is_policy_followed is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Check appeal policy before appeal action",
         )
 
@@ -2274,7 +2393,7 @@ def appeal_action(
     ).first()
     if not report_entry:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Report associated with restrict/ban appeal not found",
         )
 
@@ -2289,7 +2408,7 @@ def appeal_action(
         pass
     elif not restrict_ban_entry:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=http_status.HTTP_404_NOT_FOUND,
             detail="Restrict/ban entry associated with report not found",
         )
 
@@ -2375,7 +2494,7 @@ def appeal_action(
         db.rollback()
         print(exc)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing appeal action request",
         ) from exc
 
@@ -2398,15 +2517,37 @@ def appeal_action(
 )
 @auth_utils.authorize(["management", "software_dev", "content_mgmt", "content_admin"])
 def get_users(
-    request: user_schema.AllUsersAdminRequest,
+    status: (
+        Literal[
+            "active",
+            "inactive",
+            "partial_restrict",
+            "full_restrict",
+            "deactivated",
+            "pending_delete",
+            "temp_ban",
+            "perm_ban",
+            "pending_delete_ban",
+            "pending_delete_inactive",
+            "deleted",
+        ]
+        | None
+    ) = Query(None),
+    sort: str | None = Query(None),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
 ):
+    # transform status
+    try:
+        user_status = map_utils.transform_status(value=status) if status else None
+    except HTTPException as exc:
+        raise exc
+
     # get users
     all_users = user_service.get_all_users_admin(
-        status_in_list=request.status, db_session=db, sort=request.sort
+        status=user_status, db_session=db, sort=sort
     )
     if not all_users:
         return {"message": "No users yet"}
@@ -2417,18 +2558,41 @@ def get_users(
 @router.get("/employees")
 @auth_utils.authorize(["management", "hr"])
 def get_employees(
-    request: employee_schema.AllEmployeesAdminRequest,
+    status: (
+        Literal[
+            "active_regular",
+            "active_probationary",
+            "inactive_emp",
+            "terminated",
+            "suspended",
+        ]
+        | None
+    ) = None,
+    type_: Literal["full_time", "part_time", "contract"] | None = None,
+    level: (
+        Literal["management", "sofware_dev", "hr", "content_admin", "content_mgmt"]
+        | None
+    ) = None,
+    sort: str | None = Query(None),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
 ):
+    # transform status and type
+    try:
+        employee_status = map_utils.transform_status(value=status) if status else None
+        employee_type = map_utils.transform_type(value=type_) if type_ else None
+        employee_level = map_utils.transform_access_role(value=level) if level else None
+    except HTTPException as exc:
+        raise exc
+
     # get employees
     all_employees = employee_service.get_all_employees_admin(
-        status_in_list=request.status,
-        type_in_list=request.type,
-        designation_in_list=request.designation,
-        sort=request.sort,
+        status=employee_status,
+        type_=employee_type,
+        designation_in_list=employee_level,
+        sort=sort,
         db_session=db,
     )
 
@@ -2471,7 +2635,7 @@ def get_employees(
     return {"employees": all_employees_response}
 
 
-@router.get("/app_metrics")
+@router.get("/app-metrics")
 @auth_utils.authorize(["management", "software_dev", "content_admin"])
 def app_activity_metrics(
     start_date: date = Query(None),

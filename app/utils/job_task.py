@@ -7,6 +7,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.config.app import settings
 from app.db.db_sqlalchemy import metadata
 from app.db.session import get_db
 from app.models import admin as admin_model
@@ -187,7 +188,7 @@ def remove_restriction_on_user_after_duration_expiration():
                             consecutive_violation.status == "TBN"
                             and user.status not in user_inactive_deactivated
                         ):
-                            url = "http://127.0.0.1:8000/api/v0/users/send_ban_mail"
+                            url = "http://127.0.0.1:8000/api/v0/users/send-ban-mail"
                             json_data = {
                                 "status": consecutive_violation.status,
                                 "email": user.email,
@@ -368,7 +369,7 @@ def remove_ban_on_user_after_duration_expiration():
                             consecutive_violation.status == "TBN"
                             and user.status not in user_inactive_deactivated
                         ):
-                            url = "http://127.0.0.1:8000/api/v0/users/send_ban_mail"
+                            url = "http://127.0.0.1:8000/api/v0/users/send-ban-mail"
                             json_data = {
                                 "status": consecutive_violation.status,
                                 "email": user.email,
@@ -482,7 +483,7 @@ def user_inactivity_delete():
             for user in inactive_auth_entries:
                 user.status = "PDI"
 
-            url = "http://127.0.0.1:8000/users/api/v0/send_delete_mail"
+            url = "http://127.0.0.1:8000/users/api/v0/send-delete-mail"
             json_data = {
                 "email": inactive_user_emails,
                 "subject": "VPKonnect - Account Deletion Due to User Inactivity",
@@ -579,7 +580,7 @@ def delete_user_after_permanent_ban_appeal_limit_expiry():
             func.now()
             >= (
                 admin_model.UserRestrictBanDetail.enforce_action_at
-                + timedelta(days=21),
+                + timedelta(days=settings.pbn_appeal_submit_limit_days),
             ),
             or_(
                 admin_model.UserContentRestrictBanAppealDetail.id == None,
@@ -644,7 +645,7 @@ def delete_user_after_permanent_ban_appeal_limit_expiry():
             for user in pbn_no_appeal_users:
                 user.status = "PDB"
 
-            url = "http://127.0.0.1:8000/users/send_delete_mail"
+            url = "http://127.0.0.1:8000/users/send-delete-mail"
             json_data = {
                 "email": pbn_no_appeal_user_emails,
                 "subject": "VPKonnect - Account Deletion Due to Appeal Limit Expiration",
@@ -701,7 +702,11 @@ def delete_content_after_ban_appeal_limit_expiry():
         .filter(
             post_model.Post.status == "BAN",
             post_model.Post.is_deleted == False,
-            func.now() >= (post_model.Post.updated_at + timedelta(days=28)),
+            func.now()
+            >= (
+                post_model.Post.updated_at
+                + timedelta(days=settings.content_appeal_submit_limit_days)
+            ),
             or_(
                 admin_model.UserContentRestrictBanAppealDetail.id == None,
                 and_(
@@ -725,7 +730,11 @@ def delete_content_after_ban_appeal_limit_expiry():
         .filter(
             comment_model.Comment.status == "BAN",
             comment_model.Comment.is_deleted == False,
-            func.now() >= (comment_model.Comment.updated_at + timedelta(days=28)),
+            func.now()
+            >= (
+                comment_model.Comment.updated_at
+                + timedelta(days=settings.content_appeal_submit_limit_days)
+            ),
             or_(
                 admin_model.UserContentRestrictBanAppealDetail.id == None,
                 and_(
@@ -810,7 +819,7 @@ def close_appeal_after_duration_limit_expiration():
                 func.now()
                 >= (
                     admin_model.UserContentRestrictBanAppealDetail.created_at
-                    + timedelta(days=30)
+                    + timedelta(days=settings.appeal_process_duration_limit_days)
                 ),
                 admin_model.UserContentRestrictBanAppealDetail.is_deleted == False,
             )
@@ -883,7 +892,7 @@ def close_appeal_after_duration_limit_expiration():
                 func.now()
                 >= (
                     admin_model.UserContentRestrictBanAppealDetail.created_at
-                    + timedelta(days=30)
+                    + timedelta(days=settings.appeal_process_duration_limit_days)
                 ),
                 admin_model.UserContentRestrictBanAppealDetail.is_deleted == False,
             )
@@ -962,7 +971,10 @@ def reduce_violation_score_quarterly():
                 ["ACP", "ACR"]
             ),
             func.now()
-            > (admin_model.UserContentReportDetail.updated_at + timedelta(days=91)),
+            > (
+                admin_model.UserContentReportDetail.updated_at
+                + timedelta(days=settings.violation_score_reduction_days)
+            ),
             admin_model.UserContentReportDetail.is_deleted == False,
             admin_model.UserContentRestrictBanAppealDetail.is_deleted == False,
         )

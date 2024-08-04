@@ -31,13 +31,15 @@ class UserFollowAssociation(Base):
     )
     follower_user_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("user.id", ondelete="CASCADE", nullable=False),
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
     )
     followed_user_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("user.id", ondelete="CASCADE", nullable=False),
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
     )
-    is_deleted = Column(Boolean(), server_default=text("False"), nullable=False)
+    is_deleted = Column(Boolean(), nullable=False, server_default=text("False"))
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, onupdate=func.now())
     UniqueConstraint(
         "follower_user_id",

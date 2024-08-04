@@ -50,7 +50,7 @@ class Comment(Base):
         overlaps="published_comment_post",
     )
     likes = relationship("CommentLike", back_populates="like_comment")
-    activity = relationship("CommentActivity", back_populates="activity_comment")
+    # activity = relationship("CommentActivity", back_populates="activity_comment")
 
 
 # orm model for comment liske table

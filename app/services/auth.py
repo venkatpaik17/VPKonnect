@@ -173,7 +173,7 @@ def user_auth_track_user_inactivity_inactive(db_session: Session):
             func.now()
             >= (
                 auth_model.UserAuthTrack.created_at
-                + timedelta(days=91)
+                + timedelta(days=settings.user_inactivity_days)
                 + timedelta(minutes=settings.refresh_token_expire_minutes)
             ),
             auth_model.UserAuthTrack.is_deleted == False,

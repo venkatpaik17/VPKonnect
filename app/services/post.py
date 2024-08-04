@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
+from app.config.app import settings
 from app.models import post as post_model
 from app.models import user as user_model
 
@@ -87,7 +88,8 @@ def get_all_posts_user_feed(
     query = db_session.query(post_model.Post).filter(
         post_model.Post.user_id.in_(followed_user_id_list),
         post_model.Post.status == "PUB",
-        post_model.Post.created_at >= func.now() - timedelta(days=3),
+        post_model.Post.created_at
+        >= func.now() - timedelta(days=settings.user_feed_posts_days),
         post_model.Post.is_ban_final == False,
         post_model.Post.is_deleted == False,
     )

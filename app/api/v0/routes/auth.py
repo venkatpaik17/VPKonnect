@@ -204,7 +204,7 @@ def user_login(
 
 
 # token rotation route for user
-@router.post(settings.api_prefix + "/token/users/refresh")
+@router.post(settings.api_prefix + "/users/token/refresh")
 def refresh_token_user(
     refresh_token: str = Cookie(None), db: Session = Depends(get_db)
 ):
@@ -243,7 +243,6 @@ def refresh_token_user(
         access_token=new_user_access_token, token_type="bearer"
     )
     response = JSONResponse(content=jsonable_encoder(access_token_data))
-
     # if refresh token is expired, generate new refresh token and set as a httponly secure cookie, add new refresh token entry to user_auth_track
     # update expired token status
     if not token_verify:
@@ -300,27 +299,29 @@ def refresh_token_user(
             )
 
             db.commit()
-
             return response
         except HTTPException as exc:
+            print(exc)
             raise exc
         except SQLAlchemyError as exc:
             db.rollback()
+            print(exc)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Error processing auth",
             ) from exc
-
-    # check refresh token status
-    token_active = auth_service.check_refresh_token_id_in_user_auth_track(
-        token_id=token_claims.token_id, status="ACT", db_session=db
-    )
-    if not token_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Access Denied, Token invalid/revoked",
+    else:
+        # check refresh token status
+        token_active = auth_service.check_refresh_token_id_in_user_auth_track(
+            token_id=token_claims.token_id, status="ACT", db_session=db
         )
+        if not token_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Access Denied, Token invalid/revoked",
+            )
 
+        # print("Response object:", response.__dict__)
     return response
 
 
@@ -630,7 +631,7 @@ def employee_login(
 
 
 # token rotation route for employee
-@router.post(settings.api_prefix + "/token/employees/refresh")
+@router.post(settings.api_prefix + "/employees/token/refresh")
 def refresh_token_employee(
     refresh_token: str = Cookie(None), db: Session = Depends(get_db)
 ):
@@ -723,6 +724,7 @@ def refresh_token_employee(
 
             return response
         except HTTPException as exc:
+            print(exc)
             raise exc
         except SQLAlchemyError as exc:
             db.rollback()
@@ -731,16 +733,16 @@ def refresh_token_employee(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Error processing auth",
             ) from exc
-
-    # check refresh token status
-    token_active = auth_service.check_refresh_token_id_in_employee_auth_track(
-        token_id=token_claims.token_id, status="ACT", db_session=db
-    )
-    if not token_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Access Denied, Token invalid/revoked",
+    else:
+        # check refresh token status
+        token_active = auth_service.check_refresh_token_id_in_employee_auth_track(
+            token_id=token_claims.token_id, status="ACT", db_session=db
         )
+        if not token_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Access Denied, Token invalid/revoked",
+            )
 
     return response
 

@@ -119,8 +119,8 @@ class UserUsernameChange(BaseModel):
         return value.lower()
 
 
-class UserFollowersFollowing(BaseModel):
-    fetch: str
+# class UserFollowersFollowing(BaseModel):
+#     fetch: str
 
 
 class UserGetFollowRequestsResponse(BaseModel):
@@ -135,8 +135,8 @@ class UserFollowersFollowingResponse(UserGetFollowRequestsResponse):
     follows_user: bool | None
 
 
-class UserRemoveFollower(BaseModel):
-    username: str
+# class UserRemoveFollower(BaseModel):
+#     username: str
 
 
 class UserDeactivationDeletion(BaseModel):
@@ -212,8 +212,8 @@ class UserProfileResponse(UserBaseOutput):
         orm_mode = True
 
 
-class UserPostRequest(BaseModel):
-    post_status: Literal["PUB", "DRF", "BAN", "FLB"]
+# class UserPostRequest(BaseModel):
+#     post_status: Literal["PUB", "DRF", "BAN", "FLB"]
 
 
 class UserFeedResponse(BaseModel):
@@ -224,9 +224,9 @@ class UserFeedResponse(BaseModel):
         orm_mode = True
 
 
-class AllUsersAdminRequest(BaseModel):
-    status: list[str] | None = None
-    sort: str | None = None
+# class AllUsersAdminRequest(BaseModel):
+#     status: list[str] | None = None
+#     sort: str | None = None
 
 
 class AllUsersAdminResponse(BaseModel):

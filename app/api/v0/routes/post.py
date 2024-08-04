@@ -29,14 +29,13 @@ image_folder = settings.image_folder
     "/",
     status_code=status.HTTP_201_CREATED,
 )
+@auth_utils.authorize(["user"])
 def create_post(
     image: UploadFile,
     post_type: Literal["publish", "draft"] = Query(),
     caption=Form(None),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     print("Hello")
     # request schema
@@ -122,12 +121,11 @@ def create_post(
 
 
 @router.get("/{post_id}")
+@auth_utils.authorize(["user"])
 def get_post(
     post_id: UUID,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get the current user
     curr_auth_user = user_service.get_user_by_email(
@@ -225,6 +223,7 @@ def get_post(
 # published post -> edit; caption only
 # draft post -> publish, edit; image and caption
 @router.put("/{post_id}")
+@auth_utils.authorize(["user"])
 def edit_post(
     post_id: UUID,
     post_type: Literal["published", "draft"] = Query(),
@@ -232,9 +231,7 @@ def edit_post(
     caption: str = Form(None),
     image: UploadFile | None = None,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # request
     edit_request = post_schema.EditPostRequest(
@@ -396,12 +393,11 @@ def edit_post(
 
 
 @router.delete("/{post_id}")
+@auth_utils.authorize(["user"])
 def remove_post(
     post_id: UUID,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
     curr_auth_user = user_service.get_user_by_email(
@@ -462,13 +458,12 @@ def remove_post(
 
 
 @router.post("/{post_id}/like")
+@auth_utils.authorize(["user"])
 def like_unlike_post(
     post_id: UUID,
     action: Literal["like", "unlike"] = Query(),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
     curr_auth_user = user_service.get_user_by_email(
@@ -554,14 +549,81 @@ def like_unlike_post(
     return {"message": f"Post has been {action}d successfully"}
 
 
+@router.get(
+    "/{post_id}/like",
+    # response_model=dict[str, list[post_schema.LikeUserResponse] | UUID | str],
+)
+@auth_utils.authorize(["user"])
+def get_post_like_users(
+    post_id: UUID,
+    limit: int = Query(3, le=9),
+    last_like_user_id: UUID = Query(None),
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
+    )
+
+    # get the post
+    post = post_service.get_a_post(
+        post_id=str(post_id),
+        status_not_in_list=["HID", "FLD", "RMV"],
+        db_session=db,
+    )
+    if not post:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
+        )
+
+    if post.status in ("BAN", "DRF", "FLB"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request",
+        )
+
+    # get the users
+    like_users, next_cursor = post_service.get_post_like_users(
+        curr_user_id=curr_auth_user.id,
+        post_id=post.id,
+        limit=limit,
+        last_like_user_id=last_like_user_id,
+        db_session=db,
+    )
+
+    if not like_users:
+        if last_like_user_id:
+            return {"message": "No more users who liked available"}
+
+        return {"like_users": [], "message": "No users liked yet"}
+
+    print(like_users[0])
+    print(next_cursor)
+
+    # like users response
+    like_users_response = [
+        post_schema.LikeUserResponse(
+            profile_picture=user["profile_picture"],
+            username=user["username"],
+            follows_user=user["follows_user"],
+        ).dict(exclude_none=True)
+        for user in like_users
+    ]
+
+    return {"like_users": like_users_response, "next_cursor": next_cursor}
+
+
+# comment on post
 @router.post("/{post_id}/comments", status_code=status.HTTP_201_CREATED)
+@auth_utils.authorize(["user"])
 def create_comment(
     post_id: UUID,
     content=Form(None),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get the current user
     curr_auth_user = user_service.get_user_by_email(
@@ -651,14 +713,13 @@ def create_comment(
     "/{post_id}/comments",
     # response_model=dict[str, list[comment_schema.CommentResponse] | UUID | str],
 )
+@auth_utils.authorize(["user"])
 def get_all_comments(
     post_id: UUID,
     limit: int = Query(3, le=9),
     last_comment_id: UUID = Query(None),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get the current user
     curr_auth_user = user_service.get_user_by_email(
@@ -725,71 +786,3 @@ def get_all_comments(
     ]
 
     return {"comments": all_comments_response, "next_cursor": next_cursor}
-
-
-@router.get(
-    "/{post_id}/like",
-    # response_model=dict[str, list[post_schema.LikeUserResponse] | UUID | str],
-)
-def get_post_like_users(
-    post_id: UUID,
-    limit: int = Query(3, le=9),
-    last_like_user_id: UUID = Query(None),
-    db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
-):
-    # get current user
-    curr_auth_user = user_service.get_user_by_email(
-        email=str(current_user.email),
-        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
-        db_session=db,
-    )
-
-    # get the post
-    post = post_service.get_a_post(
-        post_id=str(post_id),
-        status_not_in_list=["HID", "FLD", "RMV"],
-        db_session=db,
-    )
-    if not post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
-        )
-
-    if post.status in ("BAN", "DRF", "FLB"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid request",
-        )
-
-    # get the users
-    like_users, next_cursor = post_service.get_post_like_users(
-        curr_user_id=curr_auth_user.id,
-        post_id=post.id,
-        limit=limit,
-        last_like_user_id=last_like_user_id,
-        db_session=db,
-    )
-
-    if not like_users:
-        if last_like_user_id:
-            return {"message": "No more users who liked available"}
-
-        return {"like_users": [], "message": "No users liked yet"}
-
-    print(like_users[0])
-    print(next_cursor)
-
-    # like users response
-    like_users_response = [
-        post_schema.LikeUserResponse(
-            profile_picture=user["profile_picture"],
-            username=user["username"],
-            follows_user=user["follows_user"],
-        ).dict(exclude_none=True)
-        for user in like_users
-    ]
-
-    return {"like_users": like_users_response, "next_cursor": next_cursor}

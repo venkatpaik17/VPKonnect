@@ -734,7 +734,7 @@ BEGIN
             SET post_like.status = 'ACT', post_like.updated_at = NOW()
             WHERE post_like.post_id = OLD.id AND post_like.status = 'HID';
         
-        END;
+        END CASE;
     END IF;
     
     IF TG_TABLE_NAME = 'comment' THEN
@@ -752,7 +752,7 @@ BEGIN
             SET comment_like.status = 'ACT', comment_like.updated_at = NOW()
             WHERE comment_like.comment_id = OLD.id AND comment_like.status = 'HID';
         
-        END;
+        END CASE;
     END IF;
     
     RETURN NULL;
@@ -795,3 +795,35 @@ AFTER UPDATE OF status ON comment
 FOR EACH ROW
 WHEN (OLD.status = 'BAN' AND NEW.status = 'PUB')
 EXECUTE FUNCTION update_postlike_commentlike_status(3);
+
+
+
+/*getting next value from bigint sequence*/
+CREATE SEQUENCE num_bigint_sequence;
+
+CREATE OR REPLACE FUNCTION get_next_value_from_sequence()
+RETURNS INTEGER AS $$
+BEGIN
+    RETURN nextval('num_bigint_sequence');
+END;
+$$ LANGUAGE plpgsql;
+
+
+/*getting next value from bigint sequence*/
+CREATE SEQUENCE num_bigint_sequence_ban_appeal_table;
+
+CREATE OR REPLACE FUNCTION get_next_value_from_sequence_ban_appeal_table()
+RETURNS INTEGER AS $$
+BEGIN
+    RETURN nextval('num_bigint_sequence_ban_appeal_table');
+END;
+$$ LANGUAGE plpgsql;
+
+
+/*Author: Dave Allie
+Link:https://blog.daveallie.com/ulid-primary-keys/
+*/
+CREATE OR REPLACE FUNCTION generate_ulid() RETURNS uuid
+AS $$
+    SELECT (lpad(to_hex(floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint), 12, '0') || encode(gen_random_bytes(10), 'hex'))::uuid;
+$$ LANGUAGE SQL;

@@ -10,6 +10,7 @@ from jose import ExpiredSignatureError, JWTError, jwt
 
 from app.config.app import settings
 from app.schemas import auth as auth_schema
+from app.utils import map as map_utils
 
 ACCESS_TOKEN_SECRET_KEY = settings.access_token_secret_key
 REFRESH_TOKEN_SECRET_KEY = settings.refresh_token_secret_key
@@ -274,8 +275,8 @@ def verify_refresh_token(refresh_token: str):
             token_id=token_id,
         )
 
-        print(token_exp)
-        print(datetime.now().timestamp())
+        # print(token_exp)
+        # print(datetime.now().timestamp())
         # check the exp, epoch comparision. token_exp is epoch timezone specific. So we use now() for current time
         if token_exp < datetime.now().timestamp():
             # return the token data with false flag
@@ -322,82 +323,6 @@ def get_current_user(
     return access_token_data
 
 
-# access_roles dict
-access_roles = {
-    "management": [
-        "CEO",
-        "CTO",
-        "CMO",
-        "CSO",
-        "CFO",
-        "COO",
-        "DHR",
-        "DOP",
-        "DOM",
-    ],
-    "software_dev": [
-        "SDE1F",
-        "SDE2F",
-        "SDE3F",
-        "SDE4F",
-        "SDE1B",
-        "SDE2B",
-        "SDE3B",
-        "SDE4B",
-        "SDET1",
-        "SDET2",
-        "SDET3",
-        "SDET4",
-        "SDM1F",
-        "SDM2F",
-        "SDM1B",
-        "SDM2B",
-    ],
-    "hr": ["HR1", "HR2", "HR3", "HRM1", "HRM2"],
-    "content_admin": ["CCA"],
-    "content_mgmt": ["CNM", "CMM", "UOA"],
-    "busn_govt_user": ["BUS", "GOV"],
-    "std_ver_user": ["STD", "VER"],
-    "user": ["STD", "VER", "BUS", "GOV"],
-    "employee": [
-        "CEO",
-        "CTO",
-        "CMO",
-        "CSO",
-        "CFO",
-        "COO",
-        "SDE1F",
-        "SDE2F",
-        "SDE3F",
-        "SDE4F",
-        "SDE1B",
-        "SDE2B",
-        "SDE3B",
-        "SDE4B",
-        "SDET1",
-        "SDET2",
-        "SDET3",
-        "SDET4",
-        "SDM1F",
-        "SDM2F",
-        "SDM1B",
-        "SDM2B",
-        "CCA",
-        "CNM",
-        "CMM",
-        "UOA",
-        "HR1",
-        "HR2",
-        "HR3",
-        "HRM1",
-        "HRM2",
-        "DHR",
-        "DOP",
-        "DOM",
-    ],
-}
-
-
 # custom dependency for role based authorization
 class AccessRoleDependency:
     def __init__(self, role: list[str]):
@@ -416,16 +341,13 @@ class AccessRoleDependency:
         # print(self.role)
         for user_role in self.role:
             try:
-                if type_desgn in access_roles[user_role]:
+                if type_desgn in map_utils.transform_access_role(value=user_role):
                     # print(access_roles[user_role])
                     # print(user_role)
                     return current_user
 
-            except KeyError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Role configuration is invalid",
-                ) from exc
+            except HTTPException as exc:
+                raise exc
 
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -480,13 +402,10 @@ def authorize(permitted_roles: list[str]):
                 )
             for role in permitted_roles:
                 try:
-                    if user_type in access_roles[role]:
+                    if user_type in map_utils.transform_access_role(value=role):
                         return func(*args, **kwargs)
-                except KeyError as exc:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Role configuration is invalid",
-                    ) from exc
+                except HTTPException as exc:
+                    raise exc
 
             raise HTTPException(
                 status_code=403,

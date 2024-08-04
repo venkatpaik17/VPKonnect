@@ -26,13 +26,12 @@ image_folder = settings.image_folder
 
 
 @router.put("/{comment_id}")
+@auth_utils.authorize(["user"])
 def edit_comment(
     comment_id: UUID,
     content: str = Form(None),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
     curr_auth_user = user_service.get_user_by_email(
@@ -115,12 +114,11 @@ def edit_comment(
 
 
 @router.delete("/{comment_id}")
+@auth_utils.authorize(["user"])
 def remove_comment(
     comment_id: UUID,
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
     curr_auth_user = user_service.get_user_by_email(
@@ -194,13 +192,12 @@ def remove_comment(
 
 
 @router.post("/{comment_id}/like")
+@auth_utils.authorize(["user"])
 def like_unlike_comment(
     comment_id: UUID,
     action: Literal["like", "unlike"] = Query(),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
     curr_auth_user = user_service.get_user_by_email(
@@ -284,14 +281,13 @@ def like_unlike_comment(
     "/{comment_id}/like",
     # response_model=dict[str, list[comment_schema.LikeUserResponse] | UUID | str],
 )
+@auth_utils.authorize(["user"])
 def get_comment_like_users(
     comment_id: UUID,
     limit: int = Query(3, le=9),
     last_like_user_id: UUID = Query(None),
     db: Session = Depends(get_db),
-    current_user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
     curr_auth_user = user_service.get_user_by_email(
@@ -332,8 +328,8 @@ def get_comment_like_users(
 
         return {"like_users": [], "message": "No users liked yet"}
 
-    print(like_users[0])
-    print(next_cursor)
+    # print(like_users[0])
+    # print(next_cursor)
 
     # like users response
     like_users_response = [

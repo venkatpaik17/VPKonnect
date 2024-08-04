@@ -38,16 +38,16 @@ class ReportBaseOutput(BaseModel):
     case_number: int
 
 
-class ReportOutput(ReportBaseOutput):
-    status: str
-    report_reason: str
-    report_reason_user: user_schema.UserBaseOutput = Field(
-        None, description="This attribute will only display if it's not None"
-    )
-    reported_at: datetime
-    last_updated_at: datetime = Field(
-        None, description="This attribute will only display if it's not None"
-    )
+# class ReportOutput(ReportBaseOutput):
+#     status: str
+#     report_reason: str
+#     report_reason_user: user_schema.UserBaseOutput = Field(
+#         None, description="This attribute will only display if it's not None"
+#     )
+#     reported_at: datetime
+#     last_updated_at: datetime = Field(
+#         None, description="This attribute will only display if it's not None"
+#     )
 
 
 class ReportRequest(BaseModel):
@@ -131,51 +131,51 @@ class ReportResponse(ReportRequest):
         orm_mode = True
 
 
-class AllReportRequest(BaseModel):
-    report_status: list[str]
+# class AllReportRequest(BaseModel):
+#     report_status: list[str]
 
-    @validator("report_status", pre=True)
-    def transform_report_status(cls, val):
-        if isinstance(val, str):
-            return transform_status(value=val)
+#     @validator("report_status", pre=True)
+#     def transform_report_status(cls, val):
+#         if isinstance(val, str):
+#             return transform_status(value=val)
 
-        raise CustomValidationError(
-            status_code=400, detail=f"Invalid report status: {val}"
-        )
+#         raise CustomValidationError(
+#             status_code=400, detail=f"Invalid report status: {val}"
+#         )
 
 
-class AllReportRequestAdmin(BaseModel):
-    status: list[str]
-    emp_id: str | None = None
-    reported_at: date | None = None
-    type: str
+# class AllReportRequestAdmin(BaseModel):
+#     status: list[str]
+#     emp_id: str | None = None
+#     reported_at: date | None = None
+#     type: str
 
-    @validator("status", pre=True)
-    def transform_report_status(cls, val):
-        if isinstance(val, str):
-            return transform_status(value=val)
+#     @validator("status", pre=True)
+#     def transform_report_status(cls, val):
+#         if isinstance(val, str):
+#             return transform_status(value=val)
 
-        raise CustomValidationError(
-            status_code=400, detail=f"Invalid report status: {val}"
-        )
+#         raise CustomValidationError(
+#             status_code=400, detail=f"Invalid report status: {val}"
+#         )
 
-    @validator("type")
-    def check_status_emp_id_type(cls, val, values):
-        status_vals = values.get("status")
-        emp_id_val = values.get("emp_id")
+#     @validator("type")
+#     def check_status_emp_id_type(cls, val, values):
+#         status_vals = values.get("status")
+#         emp_id_val = values.get("emp_id")
 
-        if status_vals != ["OPN"] and val == "new":
-            raise CustomValidationError(
-                status_code=400,
-                detail=f"Invalid value: {val} for status: {status_vals}",
-            )
+#         if status_vals != ["OPN"] and val == "new":
+#             raise CustomValidationError(
+#                 status_code=400,
+#                 detail=f"Invalid value: {val} for status: {status_vals}",
+#             )
 
-        if val == "new" and emp_id_val is not None:
-            raise CustomValidationError(
-                status_code=400, detail=f"Invalid value: {emp_id_val} for type: {val}"
-            )
+#         if val == "new" and emp_id_val is not None:
+#             raise CustomValidationError(
+#                 status_code=400, detail=f"Invalid value: {emp_id_val} for type: {val}"
+#             )
 
-        return val
+#         return val
 
 
 class AllReportResponse(ReportRequest):
@@ -194,14 +194,13 @@ class ReportAssignUpdate(ReportUnderReviewUpdate):
     moderator_emp_id: str
 
 
-class ReportOpenRelated(BaseModel):
-    admin_dashboard: bool
+# class ReportOpenRelated(BaseModel):
+#     admin_dashboard: bool
 
 
 class EnforceReportActionAuto(BaseModel):
     case_number: int
     reported_username: str
-    moderator_emp_id: str
 
 
 class EnforceReportActionManual(EnforceReportActionAuto):
@@ -211,64 +210,62 @@ class EnforceReportActionManual(EnforceReportActionAuto):
 
 
 class CloseReport(BaseModel):
-    reported_username: str
     moderator_note: str
-    moderator_emp_id: str
 
 
 class AppealRequest(BaseModel):
     status: str
 
 
-class AllAppealRequest(BaseModel):
-    appeal_status: list[str]
+# class AllAppealRequest(BaseModel):
+#     appeal_status: list[str]
 
-    @validator("appeal_status", pre=True)
-    def transform_appeal_status(cls, val):
-        if isinstance(val, str):
-            return transform_status(value=val)
+#     @validator("appeal_status", pre=True)
+#     def transform_appeal_status(cls, val):
+#         if isinstance(val, str):
+#             return transform_status(value=val)
 
-        raise CustomValidationError(
-            status_code=400, detail=f"Invalid appeal status: {val}"
-        )
-
-
-class AllAppealRequestAdmin(BaseModel):
-    status: list[str]
-    emp_id: str | None = None
-    appealed_at: date | None = None
-    type: str
-
-    @validator("status", pre=True)
-    def transform_appeal_status(cls, val):
-        if isinstance(val, str):
-            return transform_status(value=val)
-
-        raise CustomValidationError(
-            status_code=400, detail=f"Invalid appeal status: {val}"
-        )
-
-    @validator("type")
-    def check_status_emp_id_type(cls, val, values):
-        status_vals = values.get("status")
-        emp_id_val = values.get("emp_id")
-
-        if status_vals != ["OPN"] and val == "new":
-            raise CustomValidationError(
-                status_code=400,
-                detail=f"Invalid value: {val} for status: {status_vals}",
-            )
-
-        if val == "new" and emp_id_val is not None:
-            raise CustomValidationError(
-                status_code=400, detail=f"Invalid value: {emp_id_val} for type: {val}"
-            )
-
-        return val
+#         raise CustomValidationError(
+#             status_code=400, detail=f"Invalid appeal status: {val}"
+#         )
 
 
-class AppealOpenRelated(ReportOpenRelated):
-    pass
+# class AllAppealRequestAdmin(BaseModel):
+#     status: list[str]
+#     emp_id: str | None = None
+#     appealed_at: date | None = None
+#     type: str
+
+#     @validator("status", pre=True)
+#     def transform_appeal_status(cls, val):
+#         if isinstance(val, str):
+#             return transform_status(value=val)
+
+#         raise CustomValidationError(
+#             status_code=400, detail=f"Invalid appeal status: {val}"
+#         )
+
+#     @validator("type")
+#     def check_status_emp_id_type(cls, val, values):
+#         status_vals = values.get("status")
+#         emp_id_val = values.get("emp_id")
+
+#         if status_vals != ["OPN"] and val == "new":
+#             raise CustomValidationError(
+#                 status_code=400,
+#                 detail=f"Invalid value: {val} for status: {status_vals}",
+#             )
+
+#         if val == "new" and emp_id_val is not None:
+#             raise CustomValidationError(
+#                 status_code=400, detail=f"Invalid value: {emp_id_val} for type: {val}"
+#             )
+
+#         return val
+
+
+# class AppealOpenRelated(ReportOpenRelated):
+#     pass
 
 
 class AllAppealResponse(AppealRequest):
@@ -330,7 +327,6 @@ class AppealAction(BaseModel):
     action: str
     appeal_username: str
     moderator_note: str
-    moderator_emp_id: str
 
 
 class AppealUnderReviewUpdate(ReportUnderReviewUpdate):
@@ -362,10 +358,8 @@ class UserSendDeleteEmail(BaseModel):
     template: str
 
 
-class CloseAppeal(BaseModel):
-    appeal_username: str
-    moderator_note: str
-    moderator_emp_id: str
+class CloseAppeal(CloseReport):
+    pass
 
 
 class AppUserMetrics(BaseModel):

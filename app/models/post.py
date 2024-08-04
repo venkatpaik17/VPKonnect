@@ -47,7 +47,7 @@ class Post(Base):
     #     "User", back_populates="flagged_to_be_banned_posts"
     # )
     likes = relationship("PostLike", back_populates="like_post")
-    activity = relationship("PostActivity", back_populates="activity_post")
+    # activity = relationship("PostActivity", back_populates="activity_post")
     published_comments = relationship(
         "Comment",
         primaryjoin="and_(Post.id == Comment.post_id, Comment.status == 'PUB', Comment.is_deleted == False)",

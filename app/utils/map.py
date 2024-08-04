@@ -1,6 +1,6 @@
 # define dictionaries for search and map
 
-from math import inf
+from fastapi import HTTPException, status
 
 report_reasons_code_dict = {
     "IDONTLIKE": "I just don't like it",
@@ -271,3 +271,141 @@ def create_appeal_moderator_notes(
     }
 
     return appeal_moderator_notes_dict.get(moderator_note)
+
+
+def transform_status(value: str):
+    status_map = {
+        "open": ["OPN"],
+        "closed": ["CSD"],
+        "review": ["URV"],
+        "resolved": ["RSD", "RSR"],
+        "future_resolved": ["FRS", "FRR"],
+        "accepted": ["ACP", "ACR"],
+        "rejected": ["REJ", "RJR"],
+        "active": "ACT",
+        "inactive": "INA",
+        "partial_restrict": "RSP",
+        "full_restrict": "RSF",
+        "deactivated": "DAH",
+        "pending_delete": "PDH",
+        "temp_ban": "TBN",
+        "perm_ban": "PBN",
+        "pending_delete_ban": "PDB",
+        "pending_delete_inactive": "PDI",
+        "deleted": "DEL",
+        "active_regular": "ACR",
+        "active_probationary": "ACP",
+        "inactive_emp": "INA",
+        "terminated": "TER",
+        "suspended": "SUP",
+        "published": "PUB",
+        "draft": "DRF",
+        "banned": "BAN",
+        "flagged_banned": "FLB",
+    }
+
+    if value in status_map:
+        return status_map[value]
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Invalid status in request: {value}",
+    )
+
+
+def transform_type(value: str):
+    type_map = {
+        "full_time": "FTE",
+        "part_time": "PTE",
+        "contract": "CTE",
+    }
+
+    if value in type_map:
+        return type_map[value]
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Invalid type in request: {value}",
+    )
+
+
+def transform_access_role(value: str):
+    # access_roles dict
+    access_roles = {
+        "management": [
+            "CEO",
+            "CTO",
+            "CMO",
+            "CSO",
+            "CFO",
+            "COO",
+            "DHR",
+            "DOP",
+            "DOM",
+        ],
+        "software_dev": [
+            "SDE1F",
+            "SDE2F",
+            "SDE3F",
+            "SDE4F",
+            "SDE1B",
+            "SDE2B",
+            "SDE3B",
+            "SDE4B",
+            "SDET1",
+            "SDET2",
+            "SDET3",
+            "SDET4",
+            "SDM1F",
+            "SDM2F",
+            "SDM1B",
+            "SDM2B",
+        ],
+        "hr": ["HR1", "HR2", "HR3", "HRM1", "HRM2"],
+        "content_admin": ["CCA"],
+        "content_mgmt": ["CNM", "CMM", "UOA"],
+        "busn_govt_user": ["BUS", "GOV"],
+        "std_ver_user": ["STD", "VER"],
+        "user": ["STD", "VER", "BUS", "GOV"],
+        "employee": [
+            "CEO",
+            "CTO",
+            "CMO",
+            "CSO",
+            "CFO",
+            "COO",
+            "SDE1F",
+            "SDE2F",
+            "SDE3F",
+            "SDE4F",
+            "SDE1B",
+            "SDE2B",
+            "SDE3B",
+            "SDE4B",
+            "SDET1",
+            "SDET2",
+            "SDET3",
+            "SDET4",
+            "SDM1F",
+            "SDM2F",
+            "SDM1B",
+            "SDM2B",
+            "CCA",
+            "CNM",
+            "CMM",
+            "UOA",
+            "HR1",
+            "HR2",
+            "HR3",
+            "HRM1",
+            "HRM2",
+            "DHR",
+            "DOP",
+            "DOM",
+        ],
+    }
+
+    if value in access_roles:
+        return access_roles[value]
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Role configuration is invalid",
+    )

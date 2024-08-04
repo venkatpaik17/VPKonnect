@@ -72,15 +72,15 @@ def get_employee_session_entries_query_by_employee_id(
 
 
 def get_all_employees_admin(
-    status_in_list: list[str] | None,
-    type_in_list: list[str] | None,
+    status: str | None,
+    type_: str | None,
     designation_in_list: list[str] | None,
     sort: str | None,
     db_session: Session,
 ):
     query = db_session.query(employee_model.Employee).filter(
-        employee_model.Employee.status.in_(status_in_list) if status_in_list else True,
-        employee_model.Employee.type.in_(type_in_list) if type_in_list else True,
+        employee_model.Employee.status == status if status else True,
+        employee_model.Employee.type == type_ if type_ else True,
         (
             employee_model.Employee.designation.in_(designation_in_list)
             if designation_in_list

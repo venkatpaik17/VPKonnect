@@ -15,14 +15,14 @@ def get_all_reports_by_status_moderator_id_reported_at(
     db_session: Session,
     moderator_id: str | None,
     reported_at: date | None,
-    _type: str = "assigned",
+    type_: str = "assigned",
 ):
     query = db_session.query(admin_model.UserContentReportDetail).filter(
         admin_model.UserContentReportDetail.status.in_(status_in_list),
         admin_model.UserContentReportDetail.is_deleted == False,
     )
 
-    if _type == "new":
+    if type_ == "new":
         query = query.filter(admin_model.UserContentReportDetail.moderator_id.is_(None))
     elif moderator_id:
         query = query.filter(
@@ -470,14 +470,14 @@ def get_all_appeals_by_status_moderator_id_reported_at(
     db_session: Session,
     moderator_id: str | None,
     reported_at: date | None,
-    _type: str = "assigned",
+    type_: str = "assigned",
 ):
     query = db_session.query(admin_model.UserContentRestrictBanAppealDetail).filter(
         admin_model.UserContentRestrictBanAppealDetail.status.in_(status_in_list),
         admin_model.UserContentRestrictBanAppealDetail.is_deleted == False,
     )
 
-    if _type == "new":
+    if type_ == "new":
         query = query.filter(
             admin_model.UserContentRestrictBanAppealDetail.moderator_id.is_(None)
         )

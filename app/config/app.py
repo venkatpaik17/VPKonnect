@@ -38,7 +38,15 @@ class AppSettings(BaseAppSettings):
     user_verify_token_expire_minutes: int
     image_max_size: int
     ttlcache_max_size: int
+
     image_folder: Path = Path("images")
+    pbn_appeal_submit_limit_days: int = 21
+    content_appeal_submit_limit_days: int = 28
+    appeal_process_duration_limit_days: int = 30
+    violation_score_reduction_days: int = 91
+    deactivation_delete_expiry_days: int = 30
+    user_feed_posts_days: int = 3
+    user_inactivity_days: int = 91
 
     allowed_cors_origin: str | list[AnyHttpUrl]
 

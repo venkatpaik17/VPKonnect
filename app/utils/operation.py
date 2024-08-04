@@ -4,9 +4,11 @@ from uuid import UUID
 import requests
 from fastapi import HTTPException, status
 from sqlalchemy import func
-from sqlalchemy.exc import SQLAlchemyError
+
+# from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.config.app import settings
 from app.db.session import get_db
 from app.models import admin as admin_model
 from app.services import admin as admin_service
@@ -291,7 +293,7 @@ def user_restrict_ban_detail_user_operation(
                 #     },
                 # )
 
-                url = "http://127.0.0.1:8000/api/v0/users/send_ban_mail"
+                url = "http://127.0.0.1:8000/api/v0/users/send-ban-mail"
                 json_data = {
                     "status": consecutive_violation.status,
                     "email": user.email,
@@ -719,7 +721,9 @@ def operations_after_accept_reject(
 
             # reject after 21 days appeal limit, PBN becomes PDB
             if restrict_ban_status == "PBN":
-                if func.now() > restrict_ban_enforce_action_at + timedelta(days=21):
+                if func.now() > restrict_ban_enforce_action_at + timedelta(
+                    days=settings.pbn_appeal_submit_limit_days
+                ):
                     # get the ban entry
                     ban_entry = (
                         admin_service.get_user_active_restrict_ban_entry_report_id(
