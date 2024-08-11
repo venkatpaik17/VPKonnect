@@ -9,17 +9,23 @@ from app.models import user as user_model
 
 
 def get_a_comment_query(
-    comment_id: str, status_not_in_list: list[str], db_session: Session
+    comment_id: str, status_not_in_list: list[str] | None, db_session: Session
 ):
     return db_session.query(comment_model.Comment).filter(
         comment_model.Comment.id == comment_id,
-        comment_model.Comment.status.notin_(status_not_in_list),
+        (
+            comment_model.Comment.status.notin_(status_not_in_list)
+            if status_not_in_list
+            else True
+        ),
         comment_model.Comment.is_deleted == False,
         comment_model.Comment.is_ban_final == False,
     )
 
 
-def get_a_comment(comment_id: str, status_not_in_list: list[str], db_session: Session):
+def get_a_comment(
+    comment_id: str, status_not_in_list: list[str] | None, db_session: Session
+):
     return get_a_comment_query(comment_id, status_not_in_list, db_session).first()
 
 
@@ -42,6 +48,23 @@ def count_comments(post_id: UUID, status_in_list: list[str], db_session: Session
             comment_model.Comment.status.in_(status_in_list),
             comment_model.Comment.is_deleted == False,
             comment_model.Comment.is_ban_final == False,
+        )
+        .scalar()
+    )
+
+
+def count_comments_admin(
+    post_id: UUID, status_in_list: list[str] | None, db_session: Session
+):
+    return (
+        db_session.query(func.count(comment_model.Comment.id))
+        .filter(
+            comment_model.Comment.post_id == post_id,
+            (
+                comment_model.Comment.status.in_(status_in_list)
+                if status_in_list
+                else True
+            ),
         )
         .scalar()
     )
@@ -77,6 +100,20 @@ def count_comment_likes(comment_id: UUID, status: str, db_session: Session):
         .filter(
             comment_model.CommentLike.id == comment_id,
             comment_model.CommentLike.status == status,
+            comment_model.CommentLike.is_deleted == False,
+        )
+        .scalar()
+    )
+
+
+def count_comment_likes_admin(
+    comment_id: UUID, status_in_list: list[str], db_session: Session
+):
+    return (
+        db_session.query(func.count(comment_model.CommentLike.id))
+        .filter(
+            comment_model.CommentLike.id == comment_id,
+            comment_model.CommentLike.status.in_(status_in_list),
             comment_model.CommentLike.is_deleted == False,
         )
         .scalar()
@@ -190,3 +227,20 @@ def get_comment_like_users(
     )
 
     return like_users_with_follow_status, next_last_like_user_row
+
+
+def get_a_comment_admin(
+    comment_id: str, status_not_in_list: list[str] | None, db_session: Session
+):
+    return (
+        db_session.query(comment_model.Comment)
+        .filter(
+            comment_model.Comment.id == comment_id,
+            (
+                comment_model.Comment.status.notin_(status_not_in_list)
+                if status_not_in_list
+                else True
+            ),
+        )
+        .first()
+    )

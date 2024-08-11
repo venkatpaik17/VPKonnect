@@ -20,10 +20,28 @@ class UserBase(BaseModel):
     def validate_username(cls, value):
         # Validation pattern for username
         pattern = r"^(?![.]+$)(?![_]+$)(?![\d]+$)(?![._]+$)(?!^[.])(?!.*\.{2,})[a-zA-Z0-9_.]{1,30}$"
+        invalid_username_message = (
+            "Invalid Username\n\n"
+            "Your username must meet the following criteria:\n"
+            "- Must be between 1 and 30 characters long.\n"
+            "- Can include letters (a-z, A-Z), digits (0-9), underscores (_), and periods (.).\n"
+            "- Cannot contain consecutive periods (..).\n"
+            "- Cannot start with a period (.).\n"
+            "- Cannot consist solely of periods (.) or underscores (_), or digits only.\n"
+            "- Cannot consist solely of periods and underscores or start with them.\n\n"
+            "Examples of invalid usernames:\n"
+            "- `....` (consists only of periods)\n"
+            "- `___` (consists only of underscores)\n"
+            "- `12345` (consists only of digits)\n"
+            "- `._._` (consists only of periods and underscores)\n"
+            "- `.username` (starts with a period)\n"
+            "- `user..name` (contains consecutive periods)\n\n"
+            "Please update your username to meet these requirements."
+        )
 
         if not re.match(pattern, value):
             raise CustomValidationError(
-                status_code=400, detail=f"Invalid username: {value}"
+                status_code=400, detail=invalid_username_message
             )
 
         # Convert username to lowercase
@@ -34,12 +52,12 @@ class UserRegister(UserBase):
     password: str = Field(min_length=8, max_length=48)
     confirm_password: str
     date_of_birth: date
-    gender: str
+    gender: Literal["M", "F", "N", "O"]
     country: str | None
-    account_visibility: str | None
-    bio: str | None
-    country_phone_code: str = Field(min_length=1, max_length=10)
-    phone_number: str = Field(max_length=12)
+    account_visibility: Literal["PBC", "PRV"] | None
+    bio: str | None = Field(None, max_length=150)
+    country_phone_code: str | None = Field(None, min_length=1, max_length=10)
+    phone_number: str | None = Field(None, max_length=12)
 
     @validator("date_of_birth", pre=True)
     def validate_age_from_date_of_birth(cls, value):
@@ -58,6 +76,35 @@ class UserRegister(UserBase):
             raise CustomValidationError(
                 status_code=400,
                 detail="User must be of age 16 or above",
+            )
+
+        return value
+
+    @validator("password", pre=True)
+    def validate_password(cls, value):
+        pattern = (
+            r"^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+={[}\]|:;\"'<,>.?/]).{8,48}$"
+        )
+        invalid_password_message = (
+            "Invalid Password\n\n"
+            "Your password must meet the following criteria:\n"
+            "- At least 8 characters long (and no more than 48 characters).\n"
+            "- Contains at least one uppercase letter (A-Z).\n"
+            "- Contains at least one digit (0-9).\n"
+            "- Contains at least one special character from the following set: `!@#$%^&*()_+-={}[]|:;\"'<,>.?/`.\n\n"
+            "Examples of invalid passwords:\n"
+            "- `password` (missing uppercase letter, digit, and special character)\n"
+            "- `P@ssword` (missing digit)\n"
+            "- `12345678` (missing uppercase letter and special character)\n"
+            "- `PASSWORD123` (missing special character)\n"
+            "- `password!` (missing uppercase letter and digit)\n"
+            "- `Pass123` (too short, missing special character)\n"
+            "- `P@ss12345678901234567890123456789012345678901234` (too long, exceeds 48 characters)\n\n"
+            "Please update your password to meet these requirements."
+        )
+        if not re.match(pattern, value):
+            raise CustomValidationError(
+                status_code=400, detail=invalid_password_message
             )
 
         return value
@@ -95,10 +142,11 @@ class UserPasswordChangeUpdate(BaseModel):
 
 
 class UserFollowRequest(BaseModel):
-    action: str
+    action: Literal["accept", "reject"]
 
 
-class UserFollow(UserFollowRequest):
+class UserFollow(BaseModel):
+    action: Literal["follow", "unfollow"]
     username: str
 
 
@@ -151,9 +199,29 @@ class UserSendVerifyEmail(BaseModel):
 class UserContentReport(BaseModel):
     username: str
     item_id: UUID | None
-    item_type: str
+    item_type: Literal["post", "comment", "account"]
     reason: str
     reason_username: str | None
+
+    @validator("item_id")
+    def validate_item_id(cls, val, values):
+        item_type_val = values["item_type"]
+        # if post/comment doesn't have item_id or account have item_id
+        if (item_type_val in ("post", "comment") and not val) or (
+            item_type_val == "account" and val
+        ):
+            if item_type_val in ("post", "comment"):
+                raise CustomValidationError(
+                    status_code=400,
+                    detail="Item ID is required for posts and comments.",
+                )
+            else:
+                raise CustomValidationError(
+                    status_code=400,
+                    detail="Item ID should not be provided for accounts.",
+                )
+
+        return val
 
 
 class UserBaseOutput(BaseModel):
@@ -175,7 +243,7 @@ class UserOutput(UserBaseOutput):
 class UserContentAppeal(BaseModel):
     username: str
     email: EmailStr
-    content_type: str
+    content_type: Literal["post", "comment", "account"]
     content_id: UUID | None
     detail: str
 
@@ -205,6 +273,7 @@ class UserProfileResponse(UserBaseOutput):
     num_of_posts: int
     num_of_followers: int
     num_of_following: int
+    bio: str | None
     followed_by: list[str] | None
     follows_user: bool | None
 
@@ -254,6 +323,12 @@ class AllUsersAdminResponse(BaseModel):
         orm_mode = True
 
 
+class UserAdminResponse(AllUsersAdminResponse):
+    num_of_posts: int
+    num_of_followers: int
+    num_of_following: int
+
+
 class UserActiveRestrictBan(BaseModel):
     status: str
     duration: str
@@ -272,6 +347,18 @@ class UserViolationDetailResponse(BaseModel):
     total_num_of_account_restrict_bans: int
     active_restrict_ban: UserActiveRestrictBan | None
     violation_score: int
+
+    class Config:
+        orm_mode = True
+
+
+class UserAboutResponse(BaseModel):
+    profile_picture: str | None
+    username: str
+    account_created_on: date
+    account_based_in: str | None
+    num_of_former_usernames: int | None = None
+    former_usernames: list[str] | None = None
 
     class Config:
         orm_mode = True

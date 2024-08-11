@@ -11,6 +11,7 @@ from jose import ExpiredSignatureError, JWTError, jwt
 from app.config.app import settings
 from app.schemas import auth as auth_schema
 from app.utils import map as map_utils
+from app.utils.exception import TokenExpiredSignatureError
 
 ACCESS_TOKEN_SECRET_KEY = settings.access_token_secret_key
 REFRESH_TOKEN_SECRET_KEY = settings.refresh_token_secret_key
@@ -209,24 +210,32 @@ def verify_access_token(access_token: str):
     # decode the token
     try:
         claims = jwt.decode(
-            access_token, ACCESS_TOKEN_SECRET_KEY, algorithms=[ALGORITHM]
+            access_token,
+            ACCESS_TOKEN_SECRET_KEY,
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False},
         )
         # get the claims
         user_email = claims.get("sub")
         user_type = claims.get("role")
-        if not user_email and not user_type:
+        token_exp = claims.get("exp")
+        if not user_email and not user_type and not token_exp:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-    # if token is expired
-    except ExpiredSignatureError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
+        # if token is expired
+        # except ExpiredSignatureError as exc:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_401_UNAUTHORIZED,
+        #         detail="Token expired",
+        #         headers={"WWW-Authenticate": "Bearer"},
+        #     ) from exc
+        if token_exp < datetime.now().timestamp():
+            raise TokenExpiredSignatureError(
+                status_code=401, detail=f"{user_type} Token expired"
+            )
     # other errors
     except JWTError as exc:
         raise HTTPException(

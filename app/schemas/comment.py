@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -32,6 +33,21 @@ class LikeUserResponse(BaseModel):
     profile_picture: str
     username: str
     follows_user: bool | None
+
+    class Config:
+        orm_mode = True
+
+
+class CommentAdminResponse(BaseModel):
+    id: UUID
+    content: str
+    status: str
+    num_of_likes: int | None
+    comment_user: CommentUserOutput
+    posted_time_ago: str
+    created_at: datetime
+    is_ban_final: bool
+    is_deleted: bool
 
     class Config:
         orm_mode = True

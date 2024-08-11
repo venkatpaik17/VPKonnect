@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -78,7 +79,7 @@ def create_user(
     if unverified_user:
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
-            detail=f"User with {unverified_user.email} already registered. Verification Pending.",
+            detail=f"{unverified_user.email} is already registered. Verification Pending.",
         )
 
     # check both entered passwords are same
@@ -173,7 +174,11 @@ def create_user(
     email_details = admin_schema.SendEmail(
         template="user_account_signup_verification.html",
         email=[EmailStr(add_user.email)],
-        body_info={"first_name": add_user.first_name, "link": verify_link},
+        body_info={
+            "first_name": add_user.first_name,
+            "link": verify_link,
+            "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
+        },
     )
     try:
         # add the token to userverificationcodetoken table
@@ -196,6 +201,7 @@ def create_user(
             detail="Error processing verification email request for user registration",
         ) from exc
     except Exception as exc:
+        db.rollback()
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error sending verification email.",
@@ -261,6 +267,7 @@ def send_verification_email_user(
             body_info={
                 "first_name": user.first_name,
                 "link": verify_link,
+                "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
             },
         )
         return_message = f"User registration verification process - An email has been sent to {user.email} for verification."
@@ -288,7 +295,11 @@ def send_verification_email_user(
         email_details = admin_schema.SendEmail(
             template="password_reset_email.html",
             email=[EmailStr(user.email)],
-            body_info={"username": user.username, "link": reset_link},
+            body_info={
+                "username": user.username,
+                "link": reset_link,
+                "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
+            },
         )
         return_message = f"An email will be sent to {user.email} if an account is registered under it."
 
@@ -456,7 +467,11 @@ def reset_password(
     email_details = admin_schema.SendEmail(
         template="password_reset_email.html",
         email=[reset_user.email],
-        body_info={"username": user.username, "link": reset_link},
+        body_info={
+            "username": user.username,
+            "link": reset_link,
+            "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
+        },
     )
 
     # add the token id to user password reset token table
@@ -573,6 +588,7 @@ def change_password_reset(
         body_info={
             "username": user.username,
             "action": "reset",
+            "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
         },
     )
 
@@ -674,6 +690,7 @@ def change_password_update(
         body_info={
             "username": curr_auth_user.username,
             "action": "updated",
+            "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
         },
     )
 
@@ -705,7 +722,7 @@ def change_password_update(
             detail="Error sending email.",
         ) from exc
 
-    return {"user": curr_auth_user.username, "message": f"Password change successful"}
+    return {"user": curr_auth_user.username, "message": "Password change successful"}
 
 
 # follow/unfollow users
@@ -742,7 +759,7 @@ def follow_user(
 
     # get follower user
     follower_user = user_service.get_user_by_email(
-        email=current_user.email,
+        email=str(current_user.email),
         status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
         db_session=db,
     )
@@ -1339,6 +1356,7 @@ def user_profile(
         num_of_posts=no_of_posts,
         num_of_followers=no_of_followers,
         num_of_following=no_of_following,
+        bio=user.bio,
         followed_by=followed_by,
         follows_user=follows_user if username != curr_auth_user.username else None,
     )
@@ -1353,7 +1371,7 @@ def user_profile(
 def get_all_user_posts(
     username: str,
     status: Literal["published", "draft", "banned", "flagged_banned"] = Query(),
-    limit: int = Query(1, le=12),
+    limit: int = Query(3, le=12),
     last_post_id: UUID = Query(None),
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
@@ -1451,7 +1469,7 @@ def get_all_user_posts(
 def user_feed(
     db: Session = Depends(get_db),
     last_seen_post_id: UUID = Query(None),
-    limit: int = Query(1, le=10),
+    limit: int = Query(3, le=10),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
@@ -1515,12 +1533,12 @@ def user_feed(
 
 
 # deactivate/soft-delete the user account
-@router.patch("/{action}")
+@router.patch("/deactivate")
 @auth_utils.authorize(["user"])
 def deactivate_or_soft_delete_user(
-    action: str,
     background_tasks: BackgroundTasks,
     password: str = Form(None),
+    action: Literal["deactivate", "delete"] = Query(),
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
@@ -1570,7 +1588,10 @@ def deactivate_or_soft_delete_user(
             email_details = admin_schema.SendEmail(
                 template="account_deletion_email.html",
                 email=[curr_auth_user.email],
-                body_info={"username": curr_auth_user.username},
+                body_info={
+                    "username": curr_auth_user.username,
+                    "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
+                },
             )
 
             # update status to pending_deletion_(hide/keep)
@@ -2110,6 +2131,7 @@ def send_ban_mail(
             "ban_enforced_datetime": email_parameters.enforced_action_at.strftime(
                 "%b %d, %Y %H:%M %Z"
             ),
+            "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
         },
     )
 
@@ -2137,6 +2159,7 @@ def send_delete_mail(
         email=email_request.email,
         body_info={
             "link": data_link,
+            "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
         },
     )
 
@@ -2194,3 +2217,57 @@ def get_user_violation_status_details(
     )
 
     return {f"{curr_auth_user.username} violation details": violation_details_response}
+
+
+@router.get("/{username}/about")
+@auth_utils.authorize(["user"])
+def about_user(
+    username: str,
+    db: Session = Depends(get_db),
+    current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
+):
+    # get current user
+    curr_auth_user = user_service.get_user_by_email(
+        email=str(current_user.email),
+        status_not_in_list=["INA", "DAH", "PDH", "TBN", "PBN", "PDB", "PDI", "DEL"],
+        db_session=db,
+    )
+
+    # get the user from username
+    user = user_service.get_user_by_username(
+        username=username,
+        status_not_in_list=["DEL", "PDB", "PDI"],
+        db_session=db,
+    )
+    if not user:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    elif user.status in ("DAH", "PDH"):
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User profile not found"
+        )
+    elif user.status == "PBN":
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail="User is banned, cannot access profile",
+        )
+
+    if curr_auth_user.username == username:
+        user_response = user_schema.UserAboutResponse(
+            profile_picture=user.profile_picture,
+            username=user.username,
+            account_created_on=user.created_at,
+            account_based_in=user.country,
+            former_usernames=user.usernames,
+            num_of_former_usernames=len(user.usernames),
+        )
+    else:
+        user_response = user_schema.UserAboutResponse(
+            profile_picture=user.profile_picture,
+            username=user.username,
+            account_created_on=user.created_at,
+            account_based_in=user.country,
+        )
+
+    return user_response

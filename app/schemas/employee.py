@@ -1,4 +1,6 @@
+import re
 from datetime import date, datetime
+from typing import Literal
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, EmailStr, Field, validator
@@ -23,7 +25,7 @@ class EmployeeRegister(EmployeeBase):
     country_phone_code: str = Field(min_length=1, max_length=10)
     phone_number: str = Field(max_length=12)
     date_of_birth: date
-    gender: str
+    gender: Literal["M", "F", "N", "O"]
     aadhaar: str = Field(min_length=12, max_length=12)
     pan: str = Field(min_length=10, max_length=10)
     address_line_1: str
@@ -86,6 +88,35 @@ class EmployeeRegister(EmployeeBase):
                 status_code=400,
                 detail="Invalid aadhaar number",
             ) from exc
+
+    @validator("password", pre=True)
+    def validate_password(cls, value):
+        pattern = (
+            r"^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+={[}\]|:;\"'<,>.?/]).{8,48}$"
+        )
+        invalid_password_message = (
+            "Invalid Password\n\n"
+            "Your password must meet the following criteria:\n"
+            "- At least 8 characters long (and no more than 48 characters).\n"
+            "- Contains at least one uppercase letter (A-Z).\n"
+            "- Contains at least one digit (0-9).\n"
+            "- Contains at least one special character from the following set: `!@#$%^&*()_+-={}[]|:;\"'<,>.?/`.\n\n"
+            "Examples of invalid passwords:\n"
+            "- `password` (missing uppercase letter, digit, and special character)\n"
+            "- `P@ssword` (missing digit)\n"
+            "- `12345678` (missing uppercase letter and special character)\n"
+            "- `PASSWORD123` (missing special character)\n"
+            "- `password!` (missing uppercase letter and digit)\n"
+            "- `Pass123` (too short, missing special character)\n"
+            "- `P@ss12345678901234567890123456789012345678901234` (too long, exceeds 48 characters)\n\n"
+            "Please update your password to meet these requirements."
+        )
+        if not re.match(pattern, value):
+            raise CustomValidationError(
+                status_code=400, detail=invalid_password_message
+            )
+
+        return value
 
 
 class EmployeeRegisterResponse(EmployeeBase):

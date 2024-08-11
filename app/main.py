@@ -12,7 +12,8 @@ from app.db.db_sqlalchemy import Base, engine
 from app.models import admin, auth, comment, post, user
 from app.utils import auth as auth_utils
 from app.utils import job_task as job_task_utils
-from app.utils.exception import CustomValidationError
+from app.utils import map as map_utils
+from app.utils.exception import CustomValidationError, TokenExpiredSignatureError
 
 ENVIRONMENT = settings.app_environment
 SHOW_DOCS_ENVIRONMENT = ("dev", "test")
@@ -52,6 +53,30 @@ def custom_validation_exception_handler(request, exc: CustomValidationError):
         status_code=exc.status_code,  # Set the status code from the exception
         content={"detail": exc.detail},  # Set the error detail in the response body
     )
+
+
+@app.exception_handler(TokenExpiredSignatureError)
+def token_expiry_exception_handler(request, exc: TokenExpiredSignatureError):
+    # extract type
+    detail_segments = exc.detail.split(" ")
+    type_ = detail_segments[0]
+
+    # get refresh token from cookie
+    refresh_token = request.cookies.get("refresh_token")
+
+    # check user or employee
+    if type_ in map_utils.transform_access_role(value="user"):
+        # user token refresh
+        return refresh_request(
+            refresh_token=refresh_token,
+            url="http://127.0.0.1:8000/api/v0/users/token/refresh",
+        )
+    else:
+        # employee token refresh
+        return refresh_request(
+            refresh_token=refresh_token,
+            url="http://127.0.0.1:8000/api/v0/employees/token/refresh",
+        )
 
 
 app.include_router(api_routes.router)
@@ -106,8 +131,7 @@ def scheduler_end():
     scheduler.shutdown()
 
 
-def refresh_request(refresh_token: str):
-    url = "http://127.0.0.1:8000/api/v0/users/token/refresh"
+def refresh_request(refresh_token: str, url: str):
     cookie_ = {"refresh_token": refresh_token}
     response = None
     try:
@@ -135,6 +159,9 @@ def root(request: Request, refresh_token: str = Cookie(None)):
     auth_header = request.headers.get("Authorization")
     main_page_message = "Hello, Welcome to VPKonnect Main Page"
 
+    # url for user token refresh
+    url = "http://127.0.0.1:8000/api/v0/users/token/refresh"
+
     if not refresh_token:
         return {"message": main_page_message}
 
@@ -153,9 +180,9 @@ def root(request: Request, refresh_token: str = Cookie(None)):
 
         except HTTPException as exc:
             print(exc)
-            return refresh_request(refresh_token=refresh_token)
+            return refresh_request(refresh_token=refresh_token, url=url)
         except Exception as exc:
             print(exc)
-            return refresh_request(refresh_token=refresh_token)
+            return refresh_request(refresh_token=refresh_token, url=url)
     else:
-        return refresh_request(refresh_token=refresh_token)
+        return refresh_request(refresh_token=refresh_token, url=url)

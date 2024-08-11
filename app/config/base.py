@@ -21,5 +21,5 @@ class BaseAppSettings(BaseSettings):
     app_environment: AppEnvTypes
 
     class Config:
-        env_file = ".env"
+        env_file = ".app.env"
         env_file_encoding = "utf-8"

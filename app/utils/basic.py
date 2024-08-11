@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime
 
 import ulid
@@ -23,3 +24,8 @@ def time_ago(post_datetime: datetime):
 # function to generate ulid and return as uuid (used ulid-py package)
 def get_ulid():
     return ulid.new().uuid
+
+
+def image_to_base64(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")

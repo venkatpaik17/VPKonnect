@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr
 
 
@@ -25,8 +27,8 @@ class RefreshTokenPayload(AccessTokenPayload):
 class UserLogout(BaseModel):
     username: str
     device_info: str | None
-    action: str
-    flow: str
+    action: Literal["one", "all"]
+    flow: Literal["user", "admin"]
 
 
 class ResetTokenPayload(BaseModel):
@@ -47,4 +49,4 @@ class EmployeeLogin(BaseModel):
 class EmployeeLogout(BaseModel):
     emp_id: str
     device_info: str
-    action: str
+    action: Literal["one", "all"]

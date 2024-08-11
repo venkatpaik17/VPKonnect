@@ -9,16 +9,22 @@ from app.models import post as post_model
 from app.models import user as user_model
 
 
-def get_a_post_query(post_id: str, status_not_in_list: list[str], db_session: Session):
+def get_a_post_query(
+    post_id: str, status_not_in_list: list[str] | None, db_session: Session
+):
     return db_session.query(post_model.Post).filter(
         post_model.Post.id == post_id,
-        post_model.Post.status.notin_(status_not_in_list),
+        (
+            post_model.Post.status.notin_(status_not_in_list)
+            if status_not_in_list
+            else True
+        ),
         post_model.Post.is_deleted == False,
         post_model.Post.is_ban_final == False,
     )
 
 
-def get_a_post(post_id: str, status_not_in_list: list[str], db_session: Session):
+def get_a_post(post_id: str, status_not_in_list: list[str] | None, db_session: Session):
     return get_a_post_query(post_id, status_not_in_list, db_session).first()
 
 
@@ -46,19 +52,47 @@ def count_posts(user_id: UUID, status: str, db_session: Session):
     )
 
 
+def count_posts_admin(user_id: UUID, status: str | None, db_session: Session):
+    return (
+        db_session.query(func.count(post_model.Post.id))
+        .filter(
+            post_model.Post.user_id == user_id,
+            post_model.Post.status == status if status else True,
+        )
+        .scalar()
+    )
+
+
 def get_all_posts_profile(
     profile_user_id: UUID,
     status: str,
     limit: int,
     last_post_id: UUID | None,
     db_session: Session,
-    is_ban_final: bool = False,
 ):
     query = db_session.query(post_model.Post).filter(
         post_model.Post.user_id == profile_user_id,
         post_model.Post.status == status,
-        post_model.Post.is_ban_final == is_ban_final,
+        post_model.Post.is_ban_final == False,
         post_model.Post.is_deleted == False,
+    )
+
+    if last_post_id:
+        query = query.filter(post_model.Post.id < last_post_id)
+
+    return query.order_by(post_model.Post.id.desc()).limit(limit).all()
+
+
+def get_all_posts_user_profile_admin(
+    profile_user_id: UUID,
+    status: str,
+    limit: int,
+    last_post_id: UUID | None,
+    db_session: Session,
+):
+    query = db_session.query(post_model.Post).filter(
+        post_model.Post.user_id == profile_user_id,
+        post_model.Post.status == status,
     )
 
     if last_post_id:
@@ -74,6 +108,19 @@ def count_post_likes(post_id: UUID, status: str, db_session: Session):
             post_model.PostLike.id == post_id,
             post_model.PostLike.status == status,
             post_model.PostLike.is_deleted == False,
+        )
+        .scalar()
+    )
+
+
+def count_post_likes_admin(
+    post_id: UUID, status_in_list: list[str], db_session: Session
+):
+    return (
+        db_session.query(func.count(post_model.PostLike.id))
+        .filter(
+            post_model.PostLike.id == post_id,
+            post_model.PostLike.status.in_(status_in_list),
         )
         .scalar()
     )
@@ -178,3 +225,20 @@ def get_post_like_users(
     )
 
     return like_users_with_follow_status, next_last_like_user_row
+
+
+def get_a_post_admin(
+    post_id: str, status_not_in_list: list[str] | None, db_session: Session
+):
+    return (
+        db_session.query(post_model.Post)
+        .filter(
+            post_model.Post.id == post_id,
+            (
+                post_model.Post.status.notin_(status_not_in_list)
+                if status_not_in_list
+                else True
+            ),
+        )
+        .first()
+    )

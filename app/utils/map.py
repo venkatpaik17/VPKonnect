@@ -302,6 +302,9 @@ def transform_status(value: str):
         "draft": "DRF",
         "banned": "BAN",
         "flagged_banned": "FLB",
+        "removed": "RMV",
+        "hidden": "HID",
+        "flagged_deleted": "FLD",
     }
 
     if value in status_map:

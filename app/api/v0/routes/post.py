@@ -153,7 +153,7 @@ def get_post(
     )
     if not post_user:
         return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Post not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Post owner not found"
         )
     print(post_user.status)
     if post_user.status in ("DAH", "PDH", "PBN", "PDB", "PDI", "DEL"):
@@ -598,7 +598,7 @@ def get_post_like_users(
         if last_like_user_id:
             return {"message": "No more users who liked available"}
 
-        return {"like_users": [], "message": "No users liked yet"}
+        return {"message": "No users liked yet"}
 
     print(like_users[0])
     print(next_cursor)
@@ -754,9 +754,9 @@ def get_all_comments(
     )
     if not all_comments:
         if last_comment_id:
-            return {"comments": [], "message": "No more comments available"}
+            return {"message": "No more comments available"}
 
-        return {"comments": [], "message": "No comments yet"}
+        return {"message": "No comments yet"}
 
     # get all comment ids
     all_comments_ids = [comment.id for comment in all_comments]

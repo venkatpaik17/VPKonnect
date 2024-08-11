@@ -48,7 +48,7 @@ BEGIN
                 WHEN NEW.status = 'ACT' AND OLD.status = 'PBN' THEN 'Users_Unbanned_Perm'
                 WHEN NEW.status = 'ACT' AND OLD.status IN ('DAH', 'INA') THEN 'Users_Reactivated'
                 WHEN NEW.status = 'ACT' AND OLD.status = 'PDH' THEN 'Users_Restored'
-                ELSE NULL
+                ELSE 'Status_No_Match'
             END,
             1, NOW()
         )
@@ -67,7 +67,7 @@ BEGIN
                 WHEN OLD.status IN ('PDH', 'PDB', 'PDI') THEN 'Users_Pending_Delete'
                 WHEN OLD.status = 'TBN' THEN 'Users_Banned_Temp'
                 WHEN OLD.status = 'PBN' THEN 'Users_Banned_Perm'
-                ELSE NULL
+                ELSE 'Status_No_Match'
             END,
             -1, NOW()
         )
@@ -114,7 +114,7 @@ CREATE OR REPLACE FUNCTION update_user_auth_track()
 RETURNS TRIGGER AS $$
 BEGIN
     UPDATE user_auth_track 
-    SET user_auth_track.status='INV', user_auth_track.updated_at = NOW()
+    SET status='INV', updated_at = NOW()
     WHERE user_id=OLD.user_id AND device_info=OLD.device_info;
    
     RETURN NULL;
@@ -141,46 +141,46 @@ BEGIN
     -- Update 'post' table
     UPDATE post
     SET status = CASE 
-        WHEN post.status = 'PUB' THEN 'HID' 
-        WHEN post.status = 'HID' THEN 'PUB'
+        WHEN status = 'PUB' THEN 'HID' 
+        WHEN status = 'HID' THEN 'PUB'
         END,
-        post.updated_at = NOW()
+        updated_at = NOW()
     WHERE user_id = user_id_param;
 
     -- Update 'comment' table
     UPDATE comment
     SET status = CASE 
-        WHEN comment.status = 'PUB' THEN 'HID' 
-        WHEN comment.status = 'HID' THEN 'PUB'
+        WHEN status = 'PUB' THEN 'HID' 
+        WHEN status = 'HID' THEN 'PUB'
         END,
-        comment.updated_at = NOW()
+        updated_at = NOW()
     WHERE user_id = user_id_param;
 
     -- Update 'post_like' table
     UPDATE post_like
     SET status = CASE 
-        WHEN post_like.status = 'ACT' THEN 'HID' 
-        WHEN post_like.status = 'HID' THEN 'ACT'
+        WHEN status = 'ACT' THEN 'HID' 
+        WHEN status = 'HID' THEN 'ACT'
         END,
-        post_like.updated_at = NOW()
+        updated_at = NOW()
     WHERE user_id = user_id_param;
 
     -- Update 'comment_like' table
     UPDATE comment_like
     SET status = CASE 
-        WHEN comment_like.status = 'ACT' THEN 'HID'
-        WHEN comment_like.status = 'HID' THEN 'ACT'
+        WHEN status = 'ACT' THEN 'HID'
+        WHEN status = 'HID' THEN 'ACT'
         END,
-        comment_like.updated_at = NOW()
+        updated_at = NOW()
     WHERE user_id = user_id_param;
 
     -- Update 'user_follow_association' table
     UPDATE user_follow_association
     SET status = CASE
-        WHEN user_follow_association.status = 'ACP' THEN 'HID'
-        WHEN user_follow_association.status = 'HID' THEN 'ACP'
+        WHEN status = 'ACP' THEN 'HID'
+        WHEN status = 'HID' THEN 'ACP'
         END,
-        user_follow_association.updated_at = NOW()
+        updated_at = NOW()
     WHERE follower_user_id = user_id_param OR followed_user_id = user_id_param;
     
     RETURN NULL;
@@ -201,34 +201,6 @@ WHEN (OLD.status IN ('DAH', 'PDH', 'PBN') AND NEW.status IN ('ACT', 'RSP', 'RSF'
 EXECUTE FUNCTION update_user_info_status();
 
 
-
-/*Sequence for getting a number from 1 to 9999*/
-CREATE SEQUENCE IF NOT EXISTS num_int_1_9999
-AS INT 
-MINVALUE 1 
-MAXVALUE 9999 
-CYCLE;
-
-
-/*Function to generate employee id*/
-CREATE OR REPLACE FUNCTION generate_employee_id(
-    first_name character varying,
-    last_name character varying,
-    join_date date
-)
-RETURNS character varying AS $$
-DECLARE
-    result_id character varying;
-BEGIN
-    result_id := 'V' || TO_CHAR(join_date, 'yyyymmdd') ||
-                 SUBSTRING(first_name, 1, 2) ||
-                 SUBSTRING(last_name, 1, 1) ||
-                 LPAD(nextval('num_int_1_9999')::TEXT, 4, '0');
-    RETURN result_id;
-END;
-$$ LANGUAGE plpgsql;
-
-
 /*Trigger for getting age for employee*/
 CREATE TRIGGER get_age_from_dob_1_trigger
 BEFORE INSERT ON "employee"
@@ -240,7 +212,7 @@ CREATE OR REPLACE FUNCTION update_employee_auth_track()
 RETURNS TRIGGER AS $$
 BEGIN
     UPDATE employee_auth_track 
-    SET employee_auth_track.status='INV', employee_auth_track.updated_at = NOW()
+    SET status='INV', updated_at = NOW()
     WHERE employee_id=OLD.employee_id AND device_info=OLD.device_info;
    
     RETURN NULL;
@@ -554,98 +526,98 @@ BEGIN
         IF OLD.status = 'PDH' THEN
             -- update is_active to FALSE in 'user_restrict_ban_detail' table 
             UPDATE user_restrict_ban_detail
-            SET user_restrict_ban_detail.is_active = FALSE, user_restrict_ban_detail.updated_at = NOW()
-            WHERE user_restrict_ban_detail.user_id = user_id_param AND user_restrict_ban_detail.is_active = TRUE;
+            SET is_active = FALSE, updated_at = NOW()
+            WHERE user_id = user_id_param AND is_active = TRUE;
 
             -- update status to CSD and moderator_note to UD in 'user_content_restrict_ban_appeal_detail' table
             UPDATE user_content_restrict_ban_appeal_detail
-            SET user_content_restrict_ban_appeal_detail.status = 'CSD', user_content_restrict_ban_appeal_detail.moderator_note = 'UD', user_content_restrict_ban_appeal_detail.updated_at = NOW()
-            WHERE user_content_restrict_ban_appeal_detail.user_id = user_id_param AND user_content_restrict_ban_appeal_detail.status IN ('OPN', 'URV');
+            SET status = 'CSD', moderator_note = 'UD', updated_at = NOW()
+            WHERE user_id = user_id_param AND status IN ('OPN', 'URV');
 
             -- update status to CSD and moderator_note to UD in 'user_content_report_detail' table
             UPDATE user_content_report_detail
-            SET user_content_report_detail.status = 'CSD', user_content_report_detail.moderator_note = 'UD', user_content_report_detail.updated_at = NOW()
-            WHERE user_content_report_detail.user_id = user_id_param AND user_content_report_detail.status IN ('OPN', 'URV');
+            SET status = 'CSD', moderator_note = 'UD', updated_at = NOW()
+            WHERE user_id = user_id_param AND status IN ('OPN', 'URV');
             
         END IF;
 
         -- update 'comment' table
         UPDATE comment
-        SET comment.is_deleted = TRUE, comment.updated_at = NOW()
-        WHERE comment.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'comment_like' table
         UPDATE comment_like
-        SET comment_like.is_deleted = TRUE, comment_like.updated_at = NOW()
-        WHERE comment_like.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'guideline_violation_score' table
         UPDATE guideline_violation_score
-        SET guideline_violation_score.is_deleted = TRUE, guideline_violation_score.updated_at = NOW()
-        WHERE guideline_violation_score.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'password_change_history' table
         UPDATE password_change_history
-        SET password_change_history.is_deleted = TRUE, password_change_history.updated_at = NOW()
-        WHERE password_change_history.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'post' table
         UPDATE post
-        SET post.is_deleted = TRUE, post.updated_at = NOW()
-        WHERE post.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'post_like' table
         UPDATE post_like
-        SET post_like.is_deleted = TRUE, post_like.updated_at = NOW()
-        WHERE post_like.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'user_auth_track' table
         UPDATE user_auth_track
-        SET user_auth_track.is_deleted = TRUE, user_auth_track.updated_at = NOW()
-        WHERE user_auth_track.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'user_content_report_detail' table
         UPDATE user_content_report_detail
-        SET user_content_report_detail.is_deleted = TRUE, user_content_report_detail.updated_at = NOW()
-        WHERE user_content_report_detail.reporter_user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE reporter_user_id = user_id_param;
         
         -- update 'user_content_restrict_ban_appeal_detail' table
         UPDATE user_content_restrict_ban_appeal_detail
-        SET user_content_restrict_ban_appeal_detail.is_deleted = TRUE, user_content_restrict_ban_appeal_detail.updated_at = NOW()
-        WHERE user_content_restrict_ban_appeal_detail.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'user_follow_association' table
         UPDATE user_follow_association
-        SET user_follow_association.is_deleted = TRUE, user_follow_association.updated_at = NOW()
+        SET is_deleted = TRUE, updated_at = NOW()
         WHERE follower_user_id = user_id_param OR followed_user_id = user_id_param;
         
         -- update 'user_restrict_ban_detail' table
         UPDATE user_restrict_ban_detail
-        SET user_restrict_ban_detail.is_deleted = TRUE, user_restrict_ban_detail.updated_at = NOW()
-        WHERE user_restrict_ban_detail.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'user_session' table
         UPDATE user_session
-        SET user_session.is_deleted = TRUE, user_session.updated_at = NOW()
-        WHERE user_session.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
         
         -- update 'username_change_history' table
         UPDATE username_change_history
-        SET username_change_history.is_deleted = TRUE, username_change_history.updated_at = NOW()
-        WHERE username_change_history.user_id = user_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE user_id = user_id_param;
     
     ELSIF param = 2 THEN
         report_id_param := OLD.report_id;
         
         -- update 'guideline_violation_last_added_score' table
         UPDATE guideline_violation_last_added_score
-        SET guideline_violation_last_added_score.is_deleted = TRUE, guideline_violation_last_added_score.updated_at = NOW()
-        WHERE guideline_violation_last_added_score.report_id = report_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE report_id = report_id_param;
         
         -- update 'account_report_flagged_content' table
         UPDATE account_report_flagged_content
-        SET account_report_flagged_content.is_deleted = TRUE, account_report_flagged_content.updated_at = NOW()
-        WHERE account_report_flagged_content.report_id = report_id_param;
+        SET is_deleted = TRUE, updated_at = NOW()
+        WHERE report_id = report_id_param;
     
     END IF;
     RETURN NULL;
@@ -678,23 +650,23 @@ BEGIN
 
     -- update 'post' table
     UPDATE post
-    SET post.is_ban_final = TRUE, post.updated_at = NOW()
-    WHERE post.status = 'BAN' AND post.is_ban_final = FALSE AND post.user_id = user_id_param;
+    SET is_ban_final = TRUE, updated_at = NOW()
+    WHERE status = 'BAN' AND is_ban_final = FALSE AND user_id = user_id_param;
 
     -- update 'comment' table
     UPDATE comment
-    SET comment.is_ban_final = TRUE, comment.updated_at = NOW()
-    WHERE comment.status = 'BAN' AND comment.is_ban_final = FALSE AND comment.user_id = user_id_param;
+    SET is_ban_final = TRUE, updated_at = NOW()
+    WHERE status = 'BAN' AND is_ban_final = FALSE AND user_id = user_id_param;
 
     -- update status to CSD and moderator_note to UD in 'user_content_restrict_ban_appeal_detail' table
     UPDATE user_content_restrict_ban_appeal_detail
-    SET user_content_restrict_ban_appeal_detail.status = 'CSD', user_content_restrict_ban_appeal_detail.moderator_note = 'UD', user_content_restrict_ban_appeal_detail.updated_at = NOW()
-    WHERE user_content_restrict_ban_appeal_detail.user_id = user_id_param AND user_content_restrict_ban_appeal_detail.status IN ('OPN', 'URV');
+    SET status = 'CSD', moderator_note = 'UD', updated_at = NOW()
+    WHERE user_id = user_id_param AND status IN ('OPN', 'URV');
 
     -- update status to CSD and moderator_note to UD in 'user_content_report_detail' table
     UPDATE user_content_report_detail
-    SET user_content_report_detail.status = 'CSD', user_content_report_detail.moderator_note = 'UD', user_content_report_detail.updated_at = NOW()
-    WHERE user_content_report_detail.user_id = user_id_param AND user_content_report_detail.status IN ('OPN', 'URV');
+    SET status = 'CSD', moderator_note = 'UD', updated_at = NOW()
+    WHERE user_id = user_id_param AND status IN ('OPN', 'URV');
 
     RETURN NULL;
 END;
@@ -723,16 +695,16 @@ BEGIN
         CASE param
         WHEN 1 THEN
             UPDATE post_like
-            SET post_like.status = 'HID', post_like.updated_at = NOW()
-            WHERE post_like.post_id = OLD.id AND post_like.status = 'ACT';
+            SET status = 'HID', updated_at = NOW()
+            WHERE post_id = OLD.id AND status = 'ACT';
         WHEN 2 THEN
             UPDATE post_like
-            SET post_like.status = 'RMV', post_like.updated_at = NOW()
-            WHERE post_like.post_id = OLD.id AND post_like.status = 'ACT';
+            SET status = 'RMV', updated_at = NOW()
+            WHERE post_id = OLD.id AND status = 'ACT';
         WHEN 3 THEN
             UPDATE post_like
-            SET post_like.status = 'ACT', post_like.updated_at = NOW()
-            WHERE post_like.post_id = OLD.id AND post_like.status = 'HID';
+            SET status = 'ACT', updated_at = NOW()
+            WHERE post_id = OLD.id AND status = 'HID';
         
         END CASE;
     END IF;
@@ -741,16 +713,16 @@ BEGIN
         CASE param
         WHEN 1 THEN
             UPDATE comment_like
-            SET comment_like.status = 'HID', comment_like.updated_at = NOW()
-            WHERE comment_like.comment_id = OLD.id AND comment_like.status = 'ACT';
+            SET status = 'HID', updated_at = NOW()
+            WHERE comment_id = OLD.id AND status = 'ACT';
         WHEN 2 THEN
             UPDATE comment_like
-            SET comment_like.status = 'RMV', comment_like.updated_at = NOW()
-            WHERE comment_like.comment_id = OLD.id AND comment_like.status = 'ACT';
+            SET status = 'RMV', updated_at = NOW()
+            WHERE comment_id = OLD.id AND status = 'ACT';
         WHEN 3 THEN
             UPDATE comment_like
-            SET comment_like.status = 'ACT', comment_like.updated_at = NOW()
-            WHERE comment_like.comment_id = OLD.id AND comment_like.status = 'HID';
+            SET status = 'ACT', updated_at = NOW()
+            WHERE comment_id = OLD.id AND status = 'HID';
         
         END CASE;
     END IF;
@@ -795,35 +767,3 @@ AFTER UPDATE OF status ON comment
 FOR EACH ROW
 WHEN (OLD.status = 'BAN' AND NEW.status = 'PUB')
 EXECUTE FUNCTION update_postlike_commentlike_status(3);
-
-
-
-/*getting next value from bigint sequence*/
-CREATE SEQUENCE num_bigint_sequence;
-
-CREATE OR REPLACE FUNCTION get_next_value_from_sequence()
-RETURNS INTEGER AS $$
-BEGIN
-    RETURN nextval('num_bigint_sequence');
-END;
-$$ LANGUAGE plpgsql;
-
-
-/*getting next value from bigint sequence*/
-CREATE SEQUENCE num_bigint_sequence_ban_appeal_table;
-
-CREATE OR REPLACE FUNCTION get_next_value_from_sequence_ban_appeal_table()
-RETURNS INTEGER AS $$
-BEGIN
-    RETURN nextval('num_bigint_sequence_ban_appeal_table');
-END;
-$$ LANGUAGE plpgsql;
-
-
-/*Author: Dave Allie
-Link:https://blog.daveallie.com/ulid-primary-keys/
-*/
-CREATE OR REPLACE FUNCTION generate_ulid() RETURNS uuid
-AS $$
-    SELECT (lpad(to_hex(floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint), 12, '0') || encode(gen_random_bytes(10), 'hex'))::uuid;
-$$ LANGUAGE SQL;

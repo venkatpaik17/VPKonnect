@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -89,3 +89,20 @@ class LikeUserResponse(BaseModel):
     profile_picture: str
     username: str
     follows_user: bool | None
+
+
+class PostAdminResponse(BaseModel):
+    id: UUID
+    image: str
+    caption: str | None
+    status: str
+    num_of_likes: int | None
+    num_of_comments: int | None
+    post_user: PostUserOutput
+    posted_time_ago: str
+    created_at: datetime
+    is_ban_final: bool
+    is_deleted: bool
+
+    class Config:
+        orm_mode = True

@@ -204,7 +204,7 @@ class EnforceReportActionAuto(BaseModel):
 
 
 class EnforceReportActionManual(EnforceReportActionAuto):
-    action: str
+    action: Literal["RSP", "RSF", "TBN", "PBN"]
     duration: int
     contents_to_be_banned: list[UUID] | None
 
@@ -324,7 +324,7 @@ class AppealResponse(AppealRequest):
 
 class AppealAction(BaseModel):
     case_number: int
-    action: str
+    action: Literal["accept", "reject"]
     appeal_username: str
     moderator_note: str
 

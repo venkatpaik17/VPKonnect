@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:12.19
+    environment:
+      POSTGRES_USER: ${DATABASE_USERNAME}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    volumes:
+      - postgres-db-data:/var/lib/postgresql/data
+      - /etc/localtime:/etc/localtime:ro
+      - ./app/init_sql:/docker-entrypoint-initdb.d
+    ports:
+      - "5433:5432"
+
+  api:
+    build: .
+    depends_on:
+      - db
+    env_file:
+      - ./.app.env
+    ports:
+      - "8000:8000"
+
+volumes:
+  postgres-db-data:

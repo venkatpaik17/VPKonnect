@@ -11,7 +11,7 @@ from app.models import user as user_model
 
 def get_user_by_username(
     username: str,
-    status_not_in_list: list[str],
+    status_not_in_list: list[str] | None,
     db_session: Session,
     is_verified: bool = True,
 ):
@@ -22,13 +22,17 @@ def get_user_by_username(
 
 def get_user_by_username_query(
     username: str,
-    status_not_in_list: list[str],
+    status_not_in_list: list[str] | None,
     db_session: Session,
     is_verified: bool = True,
 ):
     return db_session.query(user_model.User).filter(
         user_model.User.username == username,
-        user_model.User.status.notin_(status_not_in_list),
+        (
+            user_model.User.status.notin_(status_not_in_list)
+            if status_not_in_list
+            else True
+        ),
         user_model.User.is_deleted == False,
         user_model.User.is_verified == is_verified,
     )
@@ -90,6 +94,34 @@ def get_user_by_id(
     user_id: str, status_not_in_list: list[str] | None, db_session: Session
 ):
     return get_user_by_id_query(user_id, status_not_in_list, db_session).first()
+
+
+def get_user_by_id_admin(
+    user_id: str, status_not_in_list: list[str] | None, db_session: Session
+):
+    return db_session.query(user_model.User).filter(
+        user_model.User.id == user_id,
+        (
+            user_model.User.status.notin_(status_not_in_list)
+            if status_not_in_list
+            else True
+        ),
+    )
+
+
+def get_user_by_username_admin(
+    username: str,
+    status_not_in_list: list[str] | None,
+    db_session: Session,
+):
+    return db_session.query(user_model.User).filter(
+        user_model.User.username == username,
+        (
+            user_model.User.status.notin_(status_not_in_list)
+            if status_not_in_list
+            else True
+        ),
+    )
 
 
 def get_all_users_admin(

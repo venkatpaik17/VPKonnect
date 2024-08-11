@@ -1,7 +1,6 @@
 from datetime import timedelta
 
 import requests
-
 # from pydantic import EmailStr
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import SQLAlchemyError
@@ -483,7 +482,7 @@ def user_inactivity_delete():
             for user in inactive_auth_entries:
                 user.status = "PDI"
 
-            url = "http://127.0.0.1:8000/users/api/v0/send-delete-mail"
+            url = "http://127.0.0.1:8000/api/v0/users/send-delete-mail"
             json_data = {
                 "email": inactive_user_emails,
                 "subject": "VPKonnect - Account Deletion Due to User Inactivity",
@@ -577,11 +576,8 @@ def delete_user_after_permanent_ban_appeal_limit_expiry():
             admin_model.UserRestrictBanDetail.status == "PBN",
             admin_model.UserRestrictBanDetail.is_active == True,
             admin_model.UserRestrictBanDetail.is_deleted == False,
-            func.now()
-            >= (
-                admin_model.UserRestrictBanDetail.enforce_action_at
-                + timedelta(days=settings.pbn_appeal_submit_limit_days),
-            ),
+            (func.now() - timedelta(days=settings.pbn_appeal_submit_limit_days))
+            >= admin_model.UserRestrictBanDetail.enforce_action_at,
             or_(
                 admin_model.UserContentRestrictBanAppealDetail.id == None,
                 and_(
@@ -645,7 +641,7 @@ def delete_user_after_permanent_ban_appeal_limit_expiry():
             for user in pbn_no_appeal_users:
                 user.status = "PDB"
 
-            url = "http://127.0.0.1:8000/users/send-delete-mail"
+            url = "http://127.0.0.1:8000/api/v0/users/send-delete-mail"
             json_data = {
                 "email": pbn_no_appeal_user_emails,
                 "subject": "VPKonnect - Account Deletion Due to Appeal Limit Expiration",
@@ -963,7 +959,7 @@ def reduce_violation_score_quarterly():
             admin_model.UserContentRestrictBanAppealDetail,
             admin_model.UserContentReportDetail.id
             == admin_model.UserContentRestrictBanAppealDetail.report_id,
-            isOuter=True,
+            isouter=True,
         )
         .filter(
             admin_model.UserContentReportDetail.status == "RSD",

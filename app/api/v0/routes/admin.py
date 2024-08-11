@@ -1,6 +1,8 @@
 from datetime import date, timedelta
 from math import floor
+from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query
 from fastapi import status as http_status
@@ -14,6 +16,7 @@ from app.db.session import get_db
 from app.models import admin as admin_model
 from app.schemas import admin as admin_schema
 from app.schemas import auth as auth_schema
+from app.schemas import comment as comment_schema
 from app.schemas import employee as employee_schema
 from app.schemas import post as post_schema
 from app.schemas import user as user_schema
@@ -23,10 +26,10 @@ from app.services import employee as employee_service
 from app.services import post as post_service
 from app.services import user as user_service
 from app.utils import auth as auth_utils
+from app.utils import basic as basic_utils
 from app.utils import email as email_utils
 from app.utils import map as map_utils
 from app.utils import operation as operation_utils
-from app.utils.exception import CustomValidationError
 
 router = APIRouter(prefix=settings.api_prefix + "/admin", tags=["Admin"])
 
@@ -1098,6 +1101,7 @@ def enforce_report_action_auto(
                         "ban_enforced_datetime": new_user_restrict_ban.enforce_action_at.strftime(
                             "%b %d, %Y %H:%M %Z"
                         ),
+                        "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
                     },
                 )
 
@@ -1593,6 +1597,7 @@ def enforce_report_action_manual(
                     "ban_enforced_datetime": new_user_restrict_ban.enforce_action_at.strftime(
                         "%b %d, %Y %H:%M %Z"
                     ),
+                    "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
                 },
             )
 
@@ -2488,6 +2493,11 @@ def appeal_action(
             for appeal in related_appeals:
                 appeal.status = "RJR"
                 appeal.moderator_note = action_request.moderator_note
+    else:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Invalid action",
+        )
     try:
         db.commit()
     except SQLAlchemyError as exc:
@@ -2553,6 +2563,139 @@ def get_users(
         return {"message": "No users yet"}
 
     return {"users": all_users}
+
+
+# get user
+@router.get("/users/{username}")
+@auth_utils.authorize(["content_mgmt", "content_admin"])
+def user_profile_details(
+    username: str,
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.get_current_user
+    ),
+):
+    # get the user from username
+    user = user_service.get_user_by_username(
+        username=username,
+        status_not_in_list=None,
+        db_session=db,
+    )
+    if not user:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    no_of_posts = post_service.count_posts_admin(
+        user_id=user.id, status=None, db_session=db
+    )
+    # get no of followers and following
+    no_of_followers = user_service.count_followers(
+        user_id=user.id, status="ACP", db_session=db
+    )
+    no_of_following = user_service.count_following(
+        user_id=user.id, status="ACP", db_session=db
+    )
+
+    user_details = user_schema.UserAdminResponse(
+        profile_picture=user.profile_picture,
+        repr_id=user.repr_id,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        username=user.username,
+        email=user.email,
+        country_phone_code=user.country_phone_code,
+        phone_number=user.phone_number,
+        date_of_birth=user.date_of_birth,
+        age=user.age,
+        gender=user.gender,
+        country=user.country,
+        account_visibility=user.account_visibility,
+        bio=user.bio,
+        status=user.status,
+        type=user.type,
+        inactive_delete_after=user.inactive_delete_after,
+        is_verified=user.is_verified,
+        created_at=user.created_at,
+        num_of_posts=no_of_posts,
+        num_of_followers=no_of_followers,
+        num_of_following=no_of_following,
+    )
+
+    return user_details
+
+
+@router.get("/users/{username}/posts")
+@auth_utils.authorize(["content_mgmt", "content_admin"])
+def get_all_user_posts(
+    username: str,
+    status: Literal[
+        "published",
+        "draft",
+        "banned",
+        "flagged_banned",
+        "hidden",
+        "removed",
+        "flagged_banned",
+    ] = Query(),
+    limit: int = Query(1, le=12),
+    last_post_id: UUID = Query(None),
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.get_current_user
+    ),
+):
+    # transform status
+    try:
+        post_status = map_utils.transform_status(value=status)
+    except HTTPException as exc:
+        raise exc
+
+    # get the user from username
+    user = user_service.get_user_by_username_admin(
+        username=username,
+        status_not_in_list=None,
+        db_session=db,
+    )
+    if not user:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # get the posts
+    all_posts = post_service.get_all_posts_user_profile_admin(
+        profile_user_id=user.id,
+        status=post_status,
+        limit=limit,
+        last_post_id=last_post_id,
+        db_session=db,
+    )
+
+    if not all_posts:
+        if last_post_id:
+            return {"message": "No more posts available"}
+
+        return {"message": "No posts yet"}
+
+    all_posts_response = [
+        post_schema.PostProfileResponse(
+            id=post.id,
+            image=post.image,
+            num_of_likes=(
+                post_service.count_post_likes_admin(
+                    post_id=post.id, status_in_list=["ACT", "HID"], db_session=db
+                )
+            ),
+            num_of_comments=(
+                comment_service.count_comments_admin(
+                    post_id=post.id, status_in_list=None, db_session=db
+                )
+            ),
+        )
+        for post in all_posts
+    ]
+
+    return all_posts_response
 
 
 @router.get("/employees")
@@ -2633,6 +2776,106 @@ def get_employees(
     ]
 
     return {"employees": all_employees_response}
+
+
+@router.get("/posts/{post_id}")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
+def get_post(
+    post_id: UUID,
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.get_current_user
+    ),
+):
+    # get the post
+    post = post_service.get_a_post_admin(
+        post_id=str(post_id), status_not_in_list=None, db_session=db
+    )
+
+    if not post:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Requested post not found",
+        )
+
+    # get the post owner
+    post_user = user_service.get_user_by_id_admin(
+        user_id=post.user_id,
+        status_not_in_list=None,
+        db_session=db,
+    )
+    if not post_user:
+        return HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Post not found"
+        )
+
+    post_response = post_schema.PostAdminResponse(
+        id=post.id,
+        image=post.image,
+        caption=post.caption,
+        status=post.status,
+        num_of_likes=post_service.count_post_likes_admin(
+            post_id=post.id, status_in_list=["ACT", "HID"], db_session=db
+        ),
+        num_of_comments=comment_service.count_comments_admin(
+            post_id=post.id, status_in_list=None, db_session=db
+        ),
+        post_user=post.post_user,
+        posted_time_ago=basic_utils.time_ago(post_datetime=post.created_at),
+        created_at=post.created_at,
+        is_ban_final=post.is_ban_final,
+        is_deleted=post.is_deleted,
+    )
+
+    return post_response
+
+
+@router.get("/comments/{comment_id}")
+@auth_utils.authorize(["content_admin", "content_mgmt"])
+def get_comment(
+    comment_id: UUID,
+    db: Session = Depends(get_db),
+    current_employee: auth_schema.AccessTokenPayload = Depends(
+        auth_utils.get_current_user
+    ),
+):
+    # get the post
+    comment = comment_service.get_a_comment_admin(
+        comment_id=str(comment_id), status_not_in_list=None, db_session=db
+    )
+
+    if not comment:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Requested comment not found",
+        )
+
+    # get the comment owner
+    comment_user = user_service.get_user_by_id_admin(
+        user_id=comment.user_id,
+        status_not_in_list=None,
+        db_session=db,
+    )
+    if not comment_user:
+        return HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Comment user not found"
+        )
+
+    comment_response = comment_schema.CommentAdminResponse(
+        id=comment.id,
+        content=comment.content,
+        status=comment.status,
+        num_of_likes=comment_service.count_comment_likes_admin(
+            comment_id=comment.id, status_in_list=["ACT", "HID"], db_session=db
+        ),
+        comment_user=comment.comment_user,
+        posted_time_ago=basic_utils.time_ago(post_datetime=comment.created_at),
+        created_at=comment.created_at,
+        is_ban_final=comment.is_ban_final,
+        is_deleted=comment.is_deleted,
+    )
+
+    return comment_response
 
 
 @router.get("/app-metrics")
