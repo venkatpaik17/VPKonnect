@@ -115,7 +115,7 @@ RETURNS TRIGGER AS $$
 BEGIN
     UPDATE user_auth_track 
     SET status='INV', updated_at = NOW()
-    WHERE user_id=OLD.user_id AND device_info=OLD.device_info;
+    WHERE status='ACT' AND user_id=OLD.user_id AND device_info=OLD.device_info;
    
     RETURN NULL;
 END;
@@ -143,6 +143,7 @@ BEGIN
     SET status = CASE 
         WHEN status = 'PUB' THEN 'HID' 
         WHEN status = 'HID' THEN 'PUB'
+        ELSE status
         END,
         updated_at = NOW()
     WHERE user_id = user_id_param;
@@ -152,6 +153,7 @@ BEGIN
     SET status = CASE 
         WHEN status = 'PUB' THEN 'HID' 
         WHEN status = 'HID' THEN 'PUB'
+        ELSE status
         END,
         updated_at = NOW()
     WHERE user_id = user_id_param;
@@ -161,6 +163,7 @@ BEGIN
     SET status = CASE 
         WHEN status = 'ACT' THEN 'HID' 
         WHEN status = 'HID' THEN 'ACT'
+        ELSE status
         END,
         updated_at = NOW()
     WHERE user_id = user_id_param;
@@ -170,6 +173,7 @@ BEGIN
     SET status = CASE 
         WHEN status = 'ACT' THEN 'HID'
         WHEN status = 'HID' THEN 'ACT'
+        ELSE status
         END,
         updated_at = NOW()
     WHERE user_id = user_id_param;
@@ -179,6 +183,7 @@ BEGIN
     SET status = CASE
         WHEN status = 'ACP' THEN 'HID'
         WHEN status = 'HID' THEN 'ACP'
+        ELSE status
         END,
         updated_at = NOW()
     WHERE follower_user_id = user_id_param OR followed_user_id = user_id_param;
@@ -213,7 +218,7 @@ RETURNS TRIGGER AS $$
 BEGIN
     UPDATE employee_auth_track 
     SET status='INV', updated_at = NOW()
-    WHERE employee_id=OLD.employee_id AND device_info=OLD.device_info;
+    WHERE status='ACT' AND employee_id=OLD.employee_id AND device_info=OLD.device_info;
    
     RETURN NULL;
 END;
@@ -262,14 +267,14 @@ BEGIN
             IF report_content_type = 'account' THEN
                 SELECT status INTO user_status FROM "user_restrict_ban_detail" WHERE user_id = OLD.reported_user_id AND content_id = OLD.reported_item_id AND content_type = OLD.reported_item_type AND is_active = TRUE;
                 IF user_status IN ('RSF', 'RSP') THEN
-                    info := 'account restricted';
+                    info := ' account restricted';
                 ELSIF user_status = 'TBN' THEN
-                    info := 'account temp banned';
+                    info := ' account temp banned';
                 ELSIF user_status = 'PBN' THEN
-                    info := 'account perm banned';
+                    info := ' account perm banned';
                 END IF;
             ELSE
-                info := report_content_type || ' Removed';
+                info := report_content_type || ' removed';
             END IF;
         END;
         event := 'Resolved';
@@ -279,16 +284,22 @@ BEGIN
             action_info TEXT;
         BEGIN
             IF report_content_type = 'account' THEN
-                action_info := 'No Action';
+                action_info := ' no action';
             ELSE
                 IF NEW.moderator_note = 'RF' THEN
-                    action_info := 'Not Removed';
+                    action_info := ' not removed';
                 ELSIF NEW.moderator_note = 'RNB' THEN
-                    action_info := 'Already Banned';
+                    action_info := ' already banned';
                 ELSIF NEW.moderator_note = 'RNF' THEN
-                    action_info := 'Already Flagged for future ban';
+                    action_info := ' already flagged for future ban';
                 ELSIF NEW.moderator_note = 'RND' THEN
-                    action_info := 'Not Found';
+                    action_info := ' not found';
+                ELSIF NEW.moderator_note = 'RNU' THEN
+                    action_info := ' user not found';
+                ELSIF NEW.moderator_note = 'SE' THEN
+                    action_info := ' System error';
+                ELSIF NEW.moderator_note = 'UD' THEN
+                    action_info := ' user deleted';
                 END IF;
             END IF;
             
@@ -327,7 +338,7 @@ EXECUTE FUNCTION insert_report_event_timeline('RES');
 CREATE TRIGGER user_content_report_close_event_trigger
 AFTER UPDATE OF status ON "user_content_report_detail"
 FOR EACH ROW
-WHEN (OLD.status = 'URV' AND NEW.status = 'CSD')
+WHEN (OLD.status IN ('OPN', 'URV') AND NEW.status = 'CSD')
 EXECUTE FUNCTION insert_report_event_timeline('CLS');
 
 
@@ -341,7 +352,7 @@ DECLARE
     event TEXT;
     info TEXT;
     user_id_var UUID;
-    ban_restrict_id UUID;
+    report_id_var UUID;
     user_status TEXT := NULL;
 BEGIN
     IF TG_NARGS <> 1 THEN
@@ -351,7 +362,7 @@ BEGIN
     action = TG_ARGV[0];
     content_type = OLD.content_type;
     user_id_var = OLD.user_id;
-    ban_restrict_id = OLD.ban_report_id;
+    report_id_var = OLD.report_id;
     
     IF action = 'SUB' THEN
         event := 'Submitted';
@@ -361,40 +372,49 @@ BEGIN
         info := 'Review in progress';
     ELSIF action = 'ACP' THEN
         IF content_type = 'account' THEN
-            SELECT status INTO user_status FROM "user_restrict_ban_detail" WHERE user_id = user_id_var AND id = ban_restrict_id;
+            SELECT status INTO user_status FROM "user_restrict_ban_detail" WHERE user_id = user_id_var AND id = report_id_var;
             IF user_status = 'RSP' THEN
-                info := content_type || ' Partial Restrict revoked';
+                info := content_type || ' partial restrict revoked';
             ELSIF user_status = 'RSF' THEN
-                info := content_type || ' Full Restrict revoked';
+                info := content_type || ' full restrict revoked';
             ELSIF user_status = 'TBN' THEN
-                info := content_type || ' Temp Ban revoked';
+                info := content_type || ' temp ban revoked';
             ELSIF user_status = 'PBN' THEN
-                info := content_type || ' Permnt Ban revoked';
+                info := content_type || ' permnt ban revoked';
             END IF;
         ELSE
-            info := content_type || ' Ban revoked';
+            info := content_type || ' ban revoked';
         END IF;
         
         event := 'Accepted';
     ELSIF action = 'REJ' THEN
         IF content_type = 'account' THEN
-            SELECT status INTO user_status FROM "user_restrict_ban_detail" WHERE user_id = user_id_var AND id = ban_restrict_id;
+            SELECT status INTO user_status FROM "user_restrict_ban_detail" WHERE user_id = user_id_var AND id = report_id_var;
             IF user_status = 'RSP' THEN
-                info := content_type || ' Partial Restrict not revoked';
+                info := content_type || ' partial restrict not revoked';
             ELSIF user_status = 'RSF' THEN
-                info := content_type || ' Full Restrict not revoked';
+                info := content_type || ' full restrict not revoked';
             ELSIF user_status = 'TBN' THEN
-                info := content_type || ' Temp Ban not revoked';
+                info := content_type || ' temp ban not revoked';
             ELSIF user_status = 'PBN' THEN
-                info := content_type || ' Permnt Ban not revoked';
+                info := content_type || ' permnt ban not revoked';
             END IF;
         ELSE
-            info := content_type || ' Ban not revoked';
+            info := content_type || ' ban not revoked';
         END IF;
         
         event := 'Rejected';
     ELSIF action = 'CLS' THEN
-        info := 'No Decision';
+        IF NEW.moderator_note = 'ANU' THEN
+            info := content_type || ' user not found';
+        ELSIF NEW.moderator_note = 'ANPC' THEN
+            info := content_type || ' not found';
+        ELSIF NEW.moderator_note = 'AE' THEN
+            info := content_type || ' appeal expired';
+        ELSIF NEW.moderator_note = 'SE' THEN
+            info := content_type || ' System error';
+        END IF;
+        
         event := 'Closed';
         
     END IF;
@@ -434,7 +454,7 @@ EXECUTE FUNCTION insert_appeal_event_timeline('REJ');
 CREATE TRIGGER user_content_restrict_ban_appeal_close_event_trigger
 AFTER UPDATE OF status ON "user_content_restrict_ban_appeal_detail"
 FOR EACH ROW
-WHEN (OLD.status = 'URV' AND NEW.status = 'CSD')
+WHEN (OLD.status IN ('OPN', 'URV') AND NEW.status = 'CSD')
 EXECUTE FUNCTION insert_appeal_event_timeline('CLS');
 
 
