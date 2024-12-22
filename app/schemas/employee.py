@@ -94,27 +94,30 @@ class EmployeeRegister(EmployeeBase):
         pattern = (
             r"^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+={[}\]|:;\"'<,>.?/]).{8,48}$"
         )
-        invalid_password_message = (
-            "Invalid Password\n\n"
-            "Your password must meet the following criteria:\n"
-            "- At least 8 characters long (and no more than 48 characters).\n"
-            "- Contains at least one uppercase letter (A-Z).\n"
-            "- Contains at least one digit (0-9).\n"
-            "- Contains at least one special character from the following set: `!@#$%^&*()_+-={}[]|:;\"'<,>.?/`.\n\n"
-            "Examples of invalid passwords:\n"
-            "- `password` (missing uppercase letter, digit, and special character)\n"
-            "- `P@ssword` (missing digit)\n"
-            "- `12345678` (missing uppercase letter and special character)\n"
-            "- `PASSWORD123` (missing special character)\n"
-            "- `password!` (missing uppercase letter and digit)\n"
-            "- `Pass123` (too short, missing special character)\n"
-            "- `P@ss12345678901234567890123456789012345678901234` (too long, exceeds 48 characters)\n\n"
-            "Please update your password to meet these requirements."
-        )
+        invalid_password_message = """
+            Invalid Password!!!
+            Your password must meet the following criteria:
+            - At least 8 characters long (and no more than 48 characters).
+            - Contains at least one uppercase letter (A-Z).
+            - Contains at least one digit (0-9).
+            - Contains at least one special character from the following set: `!@#$%^&*()_+-={}[]|:;\"'<,>.?/`.
+            Examples of invalid passwords:
+            - password (missing uppercase letter, digit, and special character)
+            - P@ssword (missing digit)
+            - 12345678 (missing uppercase letter and special character)
+            - PASSWORD123 (missing special character)
+            - password! (missing uppercase letter and digit)
+            - Pass123 (too short, missing special character)
+            - P@ss123456789012345678901234567890123456789012345 (too long, exceeds 48 characters)
+            Please update your password to meet these requirements.
+        """
+
+        message_lines = [
+            line.strip() for line in invalid_password_message.strip().split("\n")
+        ]
+
         if not re.match(pattern, value):
-            raise CustomValidationError(
-                status_code=400, detail=invalid_password_message
-            )
+            raise CustomValidationError(status_code=400, detail=message_lines)
 
         return value
 

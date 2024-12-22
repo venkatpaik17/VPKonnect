@@ -15,6 +15,7 @@ from app.services import admin as admin_service
 from app.services import comment as comment_service
 from app.services import post as post_service
 from app.services import user as user_service
+from app.utils import log as log_utils
 
 
 def consecutive_violation_operations(
@@ -28,8 +29,10 @@ def consecutive_violation_operations(
     consecutive_violation_report = consecutive_violation_report_query.first()
 
     if not consecutive_violation_report:
-        print("Report concerning the consecutive violation not found")
-        raise Exception("Error. Report concerning the consecutive violation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Error. Report concerning the consecutive violation not found",
+        )
 
     consecutive_violation_report_query.update(
         {"status": "RSD"}, synchronize_session=False
@@ -64,7 +67,10 @@ def consecutive_violation_operations(
     violation_score_entry = violation_score_query.first()
     if not violation_score_entry:
         print("Guideline Violation Score for user not found")
-        raise Exception("Error. Guideline Violation Score for user not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Error. Guideline Violation Score for user not found",
+        )
 
     last_added_score_entry = admin_service.get_last_added_score(
         score_id=str(violation_score_entry.id),
@@ -73,9 +79,9 @@ def consecutive_violation_operations(
         is_added=False,
     )
     if not last_added_score_entry:
-        print("Last added score concerning the report and user not found")
-        raise Exception(
-            "Error. Last added score concerning the report and user not found"
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Error. Last added score concerning the report and user not found",
         )
 
     # get the score type and curr score of that score type
@@ -121,26 +127,29 @@ def consecutive_violation_operations(
             )
         )
         if not valid_flagged_content:
-            raise Exception(
-                "Error. Valid Flagged Content(s) associated with consecutive violation report not found"
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Error. Valid Flagged Content(s) associated with consecutive violation report not found",
             )
 
         valid_flagged_content_ids = [content[0] for content in valid_flagged_content]
         # we flag only posts for report type account, so content is basically post, valid_flagged_content_ids is a list of post ids
         for content_id in valid_flagged_content_ids:
-            print(content_id)
+            # print(content_id)
             post = post_service.get_a_post(
                 post_id=str(content_id),
                 status_not_in_list=["PUB", "DRF", "HID", "RMV"],
                 db_session=db,
             )
             if not post:
-                raise Exception(
-                    "Error. Valid Flagged Post associated with consecutive violation account report not found"
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Error. Valid Flagged Post associated with consecutive violation account report not found",
                 )
             if post.status == "BAN":
-                raise Exception(
-                    "Error. Valid Flagged Post associated with consecutive violation account report already banned"
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Error. Valid Flagged Post associated with consecutive violation account report already banned",
                 )
 
             if post.status == "FLD":
@@ -155,12 +164,14 @@ def consecutive_violation_operations(
                 db_session=db,
             )
             if not post:
-                raise Exception(
-                    "Error. Post associated with consecutive violation report not found"
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Error. Post associated with consecutive violation report not found",
                 )
             if post.status == "BAN":
-                raise Exception(
-                    "Error. Post associated with consecutive violation report already banned"
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Error. Post associated with consecutive violation report already banned",
                 )
 
             if post.status == "FLD":
@@ -175,12 +186,14 @@ def consecutive_violation_operations(
                 db_session=db,
             )
             if not comment:
-                raise Exception(
-                    "Error. Comment associated with consecutive violation report not found"
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Error. Comment associated with consecutive violation report not found",
                 )
             if comment.status == "BAN":
-                raise Exception(
-                    "Error. Comment associated with consecutive violation report already banned"
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Error. Comment associated with consecutive violation report already banned",
                 )
 
             if comment.status == "FLD":
@@ -216,6 +229,9 @@ def user_restrict_ban_detail_user_operation(
         status_not_in_list=["ACT", "PDI", "PDB", "DEL"],
         db_session=db,
     )
+
+    consecutive_violation = None
+    send_mail = False
     if user:
         # subquery to get the next nearest enforce_action_at which is greater than now(), scalar is used to directly fetch the value of single column value from the query
         subq_min_enforce_action_at = (
@@ -292,39 +308,7 @@ def user_restrict_ban_detail_user_operation(
                 #         ),
                 #     },
                 # )
-
-                url = "http://127.0.0.1:8000/api/v0/users/send-ban-mail"
-                json_data = {
-                    "status": consecutive_violation.status,
-                    "email": user.email,
-                    "username": user.username,
-                    "duration": consecutive_violation.duration,
-                    "enforced_action_at": consecutive_violation.enforce_action_at.isoformat(),
-                }
-
-                response = None
-                try:
-                    # Make the POST request with JSON body parameters and a timeout
-                    response = requests.post(url, json=json_data, timeout=3)
-                    response.raise_for_status()
-                    print(
-                        "Request sent successfully with ",
-                        response.status_code,
-                    )
-                except requests.Timeout:
-                    print("The request timed out")
-                    raise
-                except requests.HTTPError as err:
-                    if response is not None:
-                        print(
-                            f"HTTP error occurred: {err} - Status code: {response.status_code}\nDetail: {response.content}"
-                        )
-                    else:
-                        print(f"HTTP error occurred: {err}")
-                    raise
-                except requests.RequestException as exc:
-                    print(f"An error occurred: {exc}")
-                    raise
+                send_mail = True
         else:
             if user.status not in user_inactive_deactivated:
                 user.status = "ACT"
@@ -334,6 +318,8 @@ def user_restrict_ban_detail_user_operation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User associated with restrict/ban not found",
         )
+
+    return consecutive_violation, send_mail
 
 
 def guideline_violation_score_last_added_score_operation(
@@ -471,6 +457,9 @@ def operations_after_appeal_accept(
     restrict_ban_is_active: bool | None,
     db: Session,
 ):
+    send_mail = None
+    consecutive_violation = None
+
     if appeal_content_type == "account":
         print("Account")
         # Appeal type: account, Report type: account
@@ -509,7 +498,7 @@ def operations_after_appeal_accept(
                 content_already_unbanned=(no_of_flagged_posts - no_of_banned_posts),
             )
 
-            user_restrict_ban_detail_user_operation(
+            consecutive_violation, send_mail = user_restrict_ban_detail_user_operation(
                 user_id=user_id,
                 report_id=report_id,
                 restrict_status=restrict_ban_status,
@@ -539,7 +528,7 @@ def operations_after_appeal_accept(
                 content_already_unbanned=0,
             )
 
-            user_restrict_ban_detail_user_operation(
+            consecutive_violation, send_mail = user_restrict_ban_detail_user_operation(
                 user_id=user_id,
                 report_id=report_id,
                 restrict_status=restrict_ban_status,
@@ -597,11 +586,13 @@ def operations_after_appeal_accept(
                 # check if all the flagged posts have PUB status, if yes then revoke the restrict, else don't
                 # if restrict is revoked, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status
                 if (no_of_posts_already_unbanned + 1) == no_of_flagged_posts:
-                    user_restrict_ban_detail_user_operation(
-                        user_id=user_id,
-                        report_id=report_id,
-                        restrict_status=restrict_ban_status,
-                        db=db,
+                    consecutive_violation, send_mail = (
+                        user_restrict_ban_detail_user_operation(
+                            user_id=user_id,
+                            report_id=report_id,
+                            restrict_status=restrict_ban_status,
+                            db=db,
+                        )
                     )
 
             # Appeal type: post, Report type: account (inactive restrict/ban)
@@ -634,11 +625,13 @@ def operations_after_appeal_accept(
                     content_already_unbanned=0,
                 )
 
-                user_restrict_ban_detail_user_operation(
-                    user_id=user_id,
-                    report_id=report_id,
-                    restrict_status=restrict_ban_status,
-                    db=db,
+                consecutive_violation, send_mail = (
+                    user_restrict_ban_detail_user_operation(
+                        user_id=user_id,
+                        report_id=report_id,
+                        restrict_status=restrict_ban_status,
+                        db=db,
+                    )
                 )
 
             # Appeal type: post/comment, Report type: post/comment (active restrict/ban concluded)
@@ -671,8 +664,10 @@ def operations_after_appeal_accept(
                 content_already_unbanned=0,
             )
 
+    return consecutive_violation, send_mail
 
-def operations_after_accept_reject(
+
+def operations_after_appeal_reject(
     user_id: UUID,
     report_id: UUID,
     appeal_content_id: UUID,
@@ -793,8 +788,20 @@ def operations_after_accept_reject(
                 appeal_reject_comment.is_ban_final = True
 
     elif appeal_content_type in ("post", "comment"):
-        # covers appeal type post/comment, report type account and appeal type post/comment and report type post/comment
-        if restrict_ban_content_type == "post":
+        # appeal type post/comment, report type account
+        if restrict_ban_content_type == "account":
+            # check if content id is present in valid flagged posts or not
+            content_in_valid_flagged_content = admin_service.get_account_report_flagged_content_entry_valid_flagged_content_id_report_id(
+                content_id=appeal_content_id, report_id=report_id, db_session=db
+            )
+
+            if not content_in_valid_flagged_content:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Appealed content id not found in account report valid flagged content list",
+                )
+
+            # get that post
             appeal_reject_post = post_service.get_a_post(
                 post_id=str(appeal_content_id),
                 status_not_in_list=["PUB", "DRF", "HID", "RMV", "FLB", "FLD"],
@@ -809,17 +816,34 @@ def operations_after_accept_reject(
             # update is_ban_final to True
             appeal_reject_post.is_ban_final = True
 
-        elif restrict_ban_content_type == "comment":
-            appeal_reject_comment = comment_service.get_a_comment(
-                comment_id=str(appeal_content_id),
-                status_not_in_list=["PUB", "HID", "RMV", "FLB", "FLD"],
-                db_session=db,
-            )
-            if not appeal_reject_comment:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Comment associated with rejected appeal not found",
+        # appeal type post/comment and report type post/comment
+        elif restrict_ban_content_type in ("post", "comment"):
+            if restrict_ban_content_type == "post":
+                appeal_reject_post = post_service.get_a_post(
+                    post_id=str(appeal_content_id),
+                    status_not_in_list=["PUB", "DRF", "HID", "RMV", "FLB", "FLD"],
+                    db_session=db,
                 )
+                if not appeal_reject_post:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Post associated with rejected appeal not found",
+                    )
 
-            # update is_ban_final to True
-            appeal_reject_comment.is_ban_final = True
+                # update is_ban_final to True
+                appeal_reject_post.is_ban_final = True
+
+            elif restrict_ban_content_type == "comment":
+                appeal_reject_comment = comment_service.get_a_comment(
+                    comment_id=str(appeal_content_id),
+                    status_not_in_list=["PUB", "HID", "RMV", "FLB", "FLD"],
+                    db_session=db,
+                )
+                if not appeal_reject_comment:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Comment associated with rejected appeal not found",
+                    )
+
+                # update is_ban_final to True
+                appeal_reject_comment.is_ban_final = True

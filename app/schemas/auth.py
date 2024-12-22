@@ -1,6 +1,8 @@
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator
+
+from app.utils.exception import CustomValidationError
 
 
 class UserLogin(BaseModel):
@@ -27,8 +29,19 @@ class RefreshTokenPayload(AccessTokenPayload):
 class UserLogout(BaseModel):
     username: str
     device_info: str | None
-    action: Literal["one", "all"]
     flow: Literal["user", "admin"]
+    action: Literal["one", "all"]
+
+    @validator("action")
+    def check_action_flow(cls, val, values):
+        flow_val = values["flow"]
+        if flow_val == "admin" and val == "one":
+            raise CustomValidationError(
+                status_code=400,
+                detail="Admin flow cannot have action as 'one'",
+            )
+
+        return val
 
 
 class ResetTokenPayload(BaseModel):

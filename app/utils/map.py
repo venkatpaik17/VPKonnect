@@ -168,9 +168,21 @@ def create_violation_moderator_notes(
             We apologize for any inconvenience.""",
         },  # system error
         "UD": {
+            "message": f"Report closed due to {username} account deletion",
+            "detail": f"""Case number: {case_number}
+            {username} account is deleted by the user. So this report submmited by user is hence closed.
+            """,
+        },
+        "UDI": {
             "message": f"Report closed due to {username} account deletion after inactivity",
             "detail": f"""Case number: {case_number}
-            User inactivity time surpassed duration set by {username}. So this report submmited by user is hence closed.
+            User inactivity time surpassed duration set by {username}. Hence user account is deleted. So this report submmited by user is hence closed.
+            """,
+        },
+        "UDB": {
+            "message": f"Report closed due to {username} account deletion after permanent ban",
+            "detail": f"""Case number: {case_number}
+            No appeals submitted by {username} upon permanent ban within the specified time. Hence user account is deleted. So this report submmited by user is hence closed.
             """,
         },
     }
@@ -267,6 +279,12 @@ def create_appeal_moderator_notes(
             Thank you for your patience and understanding. 
             Please refer to our Appeal Policy for further details on what this decision entails and any next steps that may be required.
             If you have any further questions or concerns, feel free to reach out to our support team.""",
+        },
+        "UD": {
+            "message": f"Appeal closed due to {username} account deletion",
+            "detail": f"""Case number: {case_number}
+            {username} account is deleted by the user. So this report submmited by user is hence closed.
+            """,
         },
     }
 

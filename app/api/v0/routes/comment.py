@@ -1,3 +1,4 @@
+from logging import Logger
 from typing import Literal
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from app.services import user as user_service
 from app.utils import auth as auth_utils
 from app.utils import basic as basic_utils
 from app.utils import image as image_utils
+from app.utils import log as log_utils
 
 router = APIRouter(prefix=settings.api_prefix + "/comments", tags=["Comments"])
 
@@ -31,6 +33,7 @@ def edit_comment(
     comment_id: UUID,
     content: str = Form(None),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
@@ -86,6 +89,7 @@ def edit_comment(
 
     except SQLAlchemyError as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error editing post",
@@ -105,7 +109,7 @@ def edit_comment(
         )
         is not None,
         tag=None,
-    ).dict(exclude_none=True)
+    )
 
     return {
         "message": "Comment has been edited successfully",
@@ -118,6 +122,7 @@ def edit_comment(
 def remove_comment(
     comment_id: UUID,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
@@ -181,9 +186,17 @@ def remove_comment(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting comment",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {
@@ -197,6 +210,7 @@ def like_unlike_comment(
     comment_id: UUID,
     action: Literal["like", "unlike"] = Query(),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
@@ -268,10 +282,17 @@ def like_unlike_comment(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error {action}ing comment",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {"message": f"Comment has been {action}d successfully"}
@@ -279,7 +300,7 @@ def like_unlike_comment(
 
 @router.get(
     "/{comment_id}/like",
-    # response_model=dict[str, list[comment_schema.LikeUserResponse] | UUID | str],
+    response_model=dict[str, list[comment_schema.LikeUserResponse] | UUID | str],
 )
 @auth_utils.authorize(["user"])
 def get_comment_like_users(
@@ -324,9 +345,9 @@ def get_comment_like_users(
 
     if not like_users:
         if last_like_user_id:
-            return {"message": "No more users who liked available"}
+            return {"message": "No more users who liked available", "info": "Done"}
 
-        return {"like_users": [], "message": "No users liked yet"}
+        return {"message": "No users liked yet"}
 
     # print(like_users[0])
     # print(next_cursor)
@@ -337,7 +358,7 @@ def get_comment_like_users(
             profile_picture=user["profile_picture"],
             username=user["username"],
             follows_user=user["follows_user"],
-        ).dict(exclude_none=True)
+        )
         for user in like_users
     ]
 

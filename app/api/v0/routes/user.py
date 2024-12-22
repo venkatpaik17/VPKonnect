@@ -1,4 +1,5 @@
 from datetime import timedelta
+from logging import Logger
 from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
@@ -13,6 +14,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi import status as http_status
+from fastapi_mail.errors import ConnectionErrors
 from pydantic import EmailStr
 from pyfa_converter import FormDepends
 from sqlalchemy import desc, func
@@ -39,6 +41,7 @@ from app.utils import auth as auth_utils
 from app.utils import basic as basic_utils
 from app.utils import email as email_utils
 from app.utils import image as image_utils
+from app.utils import log as log_utils
 from app.utils import map as map_utils
 from app.utils import password as password_utils
 
@@ -54,9 +57,10 @@ def create_user(
     background_tasks: BackgroundTasks,
     request: user_schema.UserRegister = FormDepends(user_schema.UserRegister),  # type: ignore
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     image: UploadFile | None = None,
 ):
-    print(request.account_visibility)
+    # print(request.account_visibility)
     # check if user registered but unverified
     unverified_user = user_service.get_user_by_email(
         email=request.email,
@@ -111,48 +115,75 @@ def create_user(
 
     user_repr_id = uuid4()
     # print(user_repr_id)
+    # print(user_subfolder)
+
+    add_user = user_model.User(**request.dict(), repr_id=user_repr_id)
 
     # create a subfolder for user specific uploads, if folder exists get it.
     user_subfolder = image_utils.get_or_create_entity_image_subfolder(
-        entity="user", repr_id=str(user_repr_id)
+        entity="user", repr_id=str(user_repr_id), logger=logger
     )
-
-    # print(user_subfolder)
 
     # create a subfolder for profile images, if folder exists get it.
     profile_subfolder = image_utils.get_or_create_entity_profile_image_subfolder(
-        entity_subfolder=user_subfolder
+        entity_subfolder=user_subfolder, logger=logger
     )
 
     # create a subfolder for profile images, if folder exists get it.
     posts_subfolder = image_utils.get_or_create_user_posts_image_subfolder(
-        user_subfolder=user_subfolder
+        user_subfolder=user_subfolder, logger=logger
     )
 
-    add_user = user_model.User(**request.dict(), repr_id=user_repr_id)
+    # create a subfolder for appeal attachments, if folder exists get it.
+    appeals_subfolder = image_utils.get_or_create_user_appeals_attachment_subfolder(
+        user_subfolder=user_subfolder, logger=logger
+    )
 
     image_path = None
-    if image:
-        # image validation and handling
-        image_name, image_path = image_utils.handle_image_operations(
-            username=request.username, target_folder=profile_subfolder, image=image
-        )
-
-        add_user = user_model.User(
-            **request.dict(), repr_id=user_repr_id, profile_picture=image_name
-        )
-
     try:
+        if image:
+            # image validation and handling
+            image_name = image_utils.validate_image_generate_name(
+                username=request.username,
+                image=image,
+                logger=logger,
+            )
+
+            add_user.profile_picture = image_name
+
+            image_path = profile_subfolder / image_name
+
+            # write image to target
+            image_utils.write_image(
+                image=image,
+                image_path=image_path,
+                logger=logger,
+            )
+
         db.add(add_user)
         db.commit()
+
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         if image and image_path:
             image_utils.remove_image(path=image_path)
+        image_utils.remove_folder(path=user_subfolder)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error registering user",
+        ) from exc
+    except HTTPException as exc:
+        image_utils.remove_folder(path=user_subfolder)
+        raise exc
+    except Exception as exc:
+        logger.error(exc, exc_info=True)
+        if image and image_path:
+            image_utils.remove_image(path=image_path)
+        image_utils.remove_folder(path=user_subfolder)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     # store image directly in the DB
@@ -195,16 +226,24 @@ def create_user(
 
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing verification email request for user registration",
         ) from exc
-    except Exception as exc:
+    except ConnectionErrors as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error sending verification email.",
+            detail="Error sending mail",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {
@@ -217,6 +256,7 @@ def send_verification_email_user(
     email_user_request: user_schema.UserSendVerifyEmail,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     # get the user
     user = user_service.get_user_by_email(
@@ -316,22 +356,35 @@ def send_verification_email_user(
         email_utils.send_email(email_subject, email_details, background_tasks)
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing email request",
         ) from exc
-    except Exception as exc:
+    except ConnectionErrors as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error sending email.",
+            detail="Error sending mail",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {"message": return_message}
 
 
 @router.post("/register/verify", response_model=user_schema.UserVerifyResponse)
-def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db)):
+def verify_user_(
+    user_verify_token: str = Form(),
+    db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
+):
     # decode token
     token_claims = auth_utils.verify_user_verify_token(token=user_verify_token)
     user_verify_token_blacklist_check = auth_utils.is_token_blacklisted(
@@ -418,10 +471,17 @@ def verify_user_(user_verify_token: str = Form(), db: Session = Depends(get_db))
 
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing user verification request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {
@@ -437,6 +497,7 @@ def reset_password(
     background_tasks: BackgroundTasks,
     user_email: EmailStr = Form(),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     reset_user = user_schema.UserPasswordReset(email=user_email)
     # check if user is valid using email
@@ -474,7 +535,7 @@ def reset_password(
         },
     )
 
-    # add the token id to user password reset token table
+    # add the token id to user verification code token table
     add_reset_token_id = auth_model.UserVerificationCodeToken(
         code_token_id=reset_token_id,
         type="PWR",
@@ -487,17 +548,28 @@ def reset_password(
 
         email_utils.send_email(email_subject, email_details, background_tasks)
     except SQLAlchemyError as exc:
+        auth_utils.blacklist_token(reset_token)
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing reset password request",
         ) from exc
-    except Exception as exc:
+    except ConnectionErrors as exc:
         auth_utils.blacklist_token(reset_token)
+        db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="There was an error in sending email",
+            detail="Error sending mail",
+        ) from exc
+    except Exception as exc:
+        auth_utils.blacklist_token(reset_token)
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {
@@ -513,6 +585,7 @@ def change_password_reset(
     confirm_password: str = Form(),
     reset_token: str = Form(),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     reset = user_schema.UserPasswordChangeReset(
         password=password, confirm_password=confirm_password, reset_token=reset_token
@@ -598,7 +671,7 @@ def change_password_reset(
             {"is_deleted": True}, synchronize_session=False
         )
         reset_token_ids = [
-            item.reset_token_id for item in user_password_reset_tokens_query.all()
+            item.code_token_id for item in user_password_reset_tokens_query.all()
         ]
         for token_id in reset_token_ids:
             auth_utils.blacklist_token(token=token_id)
@@ -618,15 +691,24 @@ def change_password_reset(
 
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing change password request",
         ) from exc
-    except Exception as exc:
+    except ConnectionErrors as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error sending email.",
+            detail="Error sending mail",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {"message": "Password change successful"}
@@ -640,6 +722,7 @@ def change_password_update(
     new_password: str = Form(),
     confirm_new_password: str = Form(),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     update = user_schema.UserPasswordChangeUpdate(
@@ -711,15 +794,24 @@ def change_password_update(
         email_utils.send_email(email_subject, email_details, background_tasks)
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing change password request",
         ) from exc
-    except Exception as exc:
+    except ConnectionErrors as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error sending email.",
+            detail="Error sending mail",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {"user": curr_auth_user.username, "message": "Password change successful"}
@@ -731,6 +823,7 @@ def change_password_update(
 def follow_user(
     followed_user: user_schema.UserFollow,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get the user to be followed
@@ -861,15 +954,25 @@ def follow_user(
             message = f"Unfollowed {followed_user.username}"
 
         db.commit()
+    except HTTPException as exc:
+        db.rollback()
+        raise exc
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing follow/unfollow user request",
         ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
 
-    return message
+    return {"message": message}
 
 
 # accept/reject follow request
@@ -879,6 +982,7 @@ def manage_follow_request(
     username: str,
     follow_request: user_schema.UserFollowRequest,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # check for user using username
@@ -953,10 +1057,17 @@ def manage_follow_request(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing accept/reject follow requests",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {"message": message}
@@ -1017,8 +1128,8 @@ def get_user_followers_following(
         )
 
     # getting count of followers and following, testing
-    print(len(curr_auth_user.followers))
-    print(len(curr_auth_user.following))
+    # print(len(curr_auth_user.followers))
+    # print(len(curr_auth_user.following))
 
     # check the fetch
     followers_list = []
@@ -1143,7 +1254,8 @@ def get_follow_requests(
         )
         .all()
     )
-    print(requests_users)
+    # print(requests_users)
+
     return requests_users
 
 
@@ -1153,6 +1265,7 @@ def get_follow_requests(
 def remove_follower(
     username: str,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get user from username
@@ -1211,10 +1324,17 @@ def remove_follower(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing remove follower request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {
@@ -1228,6 +1348,7 @@ def remove_follower(
 def username_change(
     new_username: str = Form(),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     update = user_schema.UserUsernameChange(new_username=new_username)
@@ -1273,10 +1394,17 @@ def username_change(
 
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing username change request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {"message": "Username change successful"}
@@ -1361,7 +1489,7 @@ def user_profile(
         follows_user=follows_user if username != curr_auth_user.username else None,
     )
 
-    return user_profile_details.dict(exclude_none=True)
+    return user_profile_details
 
 
 @router.get(
@@ -1435,7 +1563,7 @@ def get_all_user_posts(
 
     if not all_posts:
         if last_post_id:
-            return {"message": "No more posts available"}
+            return {"message": "No more posts available", "info": "Done"}
 
         return {"message": "No posts yet"}
 
@@ -1457,7 +1585,7 @@ def get_all_user_posts(
                 if post.status != "DRF"
                 else None
             ),
-        ).dict(exclude_none=True)
+        )
         for post in all_posts
     ]
 
@@ -1540,6 +1668,7 @@ def deactivate_or_soft_delete_user(
     password: str = Form(None),
     action: Literal["deactivate", "delete"] = Query(),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
@@ -1601,8 +1730,6 @@ def deactivate_or_soft_delete_user(
             # )
             curr_auth_user.status = "PDH"
 
-            email_utils.send_email(email_subject, email_details, background_tasks)
-
             message = f"Your account deletion request is accepted. @{curr_auth_user.username} account will be deleted after a deactivation period of 30 days. An email for the same has been sent to {user.email}"
         else:
             raise HTTPException(
@@ -1611,20 +1738,32 @@ def deactivate_or_soft_delete_user(
             )
 
         db.commit()
+
+        if action == "delete":
+            email_utils.send_email(email_subject, email_details, background_tasks)
+
     except SQLAlchemyError as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing deactivate/delete user request",
         ) from exc
+    except ConnectionErrors as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error sending mail",
+        ) from exc
     except HTTPException as exc:
         raise exc
     except Exception as exc:
-        print(exc)
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing deactivate/delete user request",
+            detail=str(exc),
         ) from exc
 
     return {"message": message}
@@ -1709,6 +1848,7 @@ def deactivate_or_soft_delete_user(
 def report_item(
     reported_item: user_schema.UserContentReport,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # check if item is there or not
@@ -1837,11 +1977,18 @@ def report_item(
         db.commit()
 
     except SQLAlchemyError as exc:
-        print(exc)
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error proccesing report item request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {
@@ -1856,10 +2003,12 @@ def appeal_content(
     ),  # type: ignore
     attachment: UploadFile | None = None,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     restrict_ban_entry = None
     report_entry = None
-    print(appeal_user_request.content_id)
+    # print(appeal_user_request.content_id)
+
     if appeal_user_request.content_type == "account":
         # get the user using username and email
         appeal_user = user_service.get_user_by_username_email(
@@ -2071,35 +2220,53 @@ def appeal_content(
     )
 
     image_path = None
-    if attachment:
-        # get user subfolder
-        user_subfolder = image_folder / "user" / str(appeal_user.repr_id)
-
-        # create a subfolder for profile images, if folder exists get it.
-        appeals_subfolder = image_utils.get_or_create_user_appeals_attachment_subfolder(
-            user_subfolder
-        )
-
-        # image validation and handling
-        image_name, image_path = image_utils.handle_image_operations(
-            username=appeal_user.username,
-            target_folder=appeals_subfolder,
-            image=attachment,
-        )
-
-        new_appeal.attachment = image_name
-
     try:
+        if attachment:
+            # image validation and handling
+            image_name = image_utils.validate_image_generate_name(
+                username=appeal_user.username,
+                image=attachment,
+                logger=logger,
+            )
+
+            new_appeal.attachment = image_name
+
+            # get appeals subfolder
+            appeals_subfolder = (
+                image_folder / "user" / str(appeal_user.repr_id) / "appeals"
+            )
+
+            image_path = appeals_subfolder / image_name
+
+            # write image to target
+            image_utils.write_image(
+                image=attachment,
+                image_path=image_path,
+                logger=logger,
+            )
+
         db.add(new_appeal)
         db.commit()
+
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         if attachment and image_path:
             image_utils.remove_image(path=image_path)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error submitting appeal",
+        ) from exc
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        if attachment and image_path:
+            image_utils.remove_image(path=image_path)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {
@@ -2141,8 +2308,10 @@ def send_ban_mail(
             email_details=email_details,
             bg_tasks=background_tasks,
         )
+    except ConnectionErrors as exc:
+        raise exc
     except Exception as exc:
-        print("Error in sending mail", exc)
+        raise exc
 
 
 @router.post("/send-delete-mail")
@@ -2169,8 +2338,10 @@ def send_delete_mail(
             email_details=email_details,
             bg_tasks=background_tasks,
         )
+    except ConnectionErrors as exc:
+        raise exc
     except Exception as exc:
-        print("Error in sending mail", exc)
+        raise exc
 
 
 @router.get("/violation")
@@ -2259,7 +2430,7 @@ def about_user(
             username=user.username,
             account_created_on=user.created_at,
             account_based_in=user.country,
-            former_usernames=user.usernames,
+            former_usernames=[item.previous_username for item in user.usernames],
             num_of_former_usernames=len(user.usernames),
         )
     else:

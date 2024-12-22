@@ -1,11 +1,16 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from logging import Logger
 from math import floor
 from pathlib import Path
+from sys import exc_info
 from typing import Literal
 from uuid import UUID
 
+import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query
 from fastapi import status as http_status
+from fastapi.responses import JSONResponse
+from fastapi_mail.errors import ConnectionErrors
 from pydantic import EmailStr
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
@@ -28,6 +33,7 @@ from app.services import user as user_service
 from app.utils import auth as auth_utils
 from app.utils import basic as basic_utils
 from app.utils import email as email_utils
+from app.utils import log as log_utils
 from app.utils import map as map_utils
 from app.utils import operation as operation_utils
 
@@ -183,6 +189,20 @@ def get_requested_report(
     if not requested_report:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="Report not found"
+        )
+
+    # if report is OPN and unassigned then only content admin can view it
+    if (
+        requested_report.status == "OPN"
+        and (not requested_report.moderator_id)
+        and (
+            current_employee.type
+            not in map_utils.transform_access_role(value="content_admin")
+        )
+    ):
+        raise HTTPException(
+            status_code=http_status.HTTP_401_UNAUTHORIZED,
+            detail="Not authorized to access requested resource",
         )
 
     # for account type and status RSD/RSR/FRS/FRR, we need to fetch the flagged/banned posts
@@ -360,6 +380,7 @@ def get_all_related_open_reports_for_specific_report(
 def selected_reports_under_review_update(
     reports_request: admin_schema.ReportUnderReviewUpdate,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -400,10 +421,17 @@ def selected_reports_under_review_update(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing select reports review/assign request",
+            detail="Error processing select reports review request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     if is_func_call:
@@ -438,6 +466,7 @@ def selected_reports_under_review_update(
 def selected_reports_assign_update(
     reports_request: admin_schema.ReportAssignUpdate,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -489,23 +518,30 @@ def selected_reports_assign_update(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing select reports assign request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     # if not func call
     if valid_reports:
         messages.append(
-            f"{len(valid_reports)} report(s), case number(s): {valid_reports} is/are assigned to {moderator.id}"
+            f"{len(valid_reports)} report(s), case number(s): {valid_reports} is/are assigned to {moderator.emp_id}"
         )
     else:
-        messages.append(f"No valid reports to assign to {moderator.id}")
+        messages.append(f"No valid reports to assign to {moderator.emp_id}")
 
     if invalid_reports:
         errors.append(
-            f"{len(invalid_reports)} report(s), case number(s): {invalid_reports} could not be assigned to {moderator.id} due to internal error. These report(s) might already be closed/resolved by concerned moderators"
+            f"{len(invalid_reports)} report(s), case number(s): {invalid_reports} could not be assigned to {moderator.emp_id} due to internal error. These report(s) might already be closed/resolved by concerned moderators"
         )
 
     if already_assigned_reports:
@@ -525,6 +561,7 @@ def close_report(
     case_number: int,
     close_request: admin_schema.CloseReport,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -607,6 +644,7 @@ def close_report(
                         case_number_list=open_related_reports_case_numbers
                     ),
                     db=db,
+                    logger=logger,
                     current_employee=current_employee,
                     is_func_call=True,
                 )
@@ -622,10 +660,21 @@ def close_report(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing close report request",
+        ) from exc
+    except HTTPException as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     moderator_note_full = map_utils.create_violation_moderator_notes(
@@ -658,6 +707,7 @@ def enforce_report_action_auto(
     action_request: admin_schema.EnforceReportActionAuto,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -807,6 +857,7 @@ def enforce_report_action_auto(
                     case_number_list=open_related_reports_case_numbers
                 ),
                 db=db,
+                logger=logger,
                 current_employee=current_employee,
                 is_func_call=True,
             )
@@ -955,7 +1006,7 @@ def enforce_report_action_auto(
         # no active restrict/ban
         elif not user_active_restrict_ban:
             is_active = True
-            enforce_action_at = func.now()
+            enforce_action_at = datetime.now().astimezone()
 
         new_user_restrict_ban = admin_model.UserRestrictBanDetail(
             status=violation_status,
@@ -977,10 +1028,14 @@ def enforce_report_action_auto(
     elif not no_action and not is_active:
         no_action_or_active_action = False
 
+    # add restrict ban entry if present
     # common operations for both action and no action
-    # add restrict ban entry and user status update if action
+    # user status update if action
     # send mail
     try:
+        if new_user_restrict_ban:
+            db.add(new_user_restrict_ban)
+
         # if no action or active restrict/ban
         if no_action_or_active_action:
             # update report to resolved
@@ -1067,11 +1122,9 @@ def enforce_report_action_auto(
                     related_report.status = "CSD"
                     related_report.moderator_note = "RF"
 
+        send_mail = False
         # user status to be updated at the end if any action
         if not no_action and new_user_restrict_ban:
-            # add restrict/ban entry
-            db.add(new_user_restrict_ban)
-
             # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or (user is deactivated/inactive and action is PBN and status is not PDH), else don't update
             if new_user_restrict_ban.is_active and (
                 not user_deactivated_inactive
@@ -1085,6 +1138,7 @@ def enforce_report_action_auto(
             # send email if action status is TBN/PBN and active action
             if is_active and violation_status in ("TBN", "PBN"):
                 # generate appeal link
+                send_mail = True
                 appeal_link = "https://vpkonnect.in/accounts/appeals/form_ban"
                 email_subject = "VPKonnect - Account Ban"
                 email_details = admin_schema.SendEmail(
@@ -1105,22 +1159,35 @@ def enforce_report_action_auto(
                     },
                 )
 
-                email_utils.send_email(email_subject, email_details, background_tasks)
-
         db.commit()
-    except SQLAlchemyError as exc:
-        print(exc)
+
+        if send_mail:
+            email_utils.send_email(email_subject, email_details, background_tasks)
+
+    except HTTPException as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
+        raise exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing enforce action request",
         ) from exc
-    except Exception as exc:
-        print(exc)
+    except ConnectionErrors as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error sending email.",
+            detail="Error sending mail",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     moderator_note_full = map_utils.create_violation_moderator_notes(
@@ -1131,17 +1198,16 @@ def enforce_report_action_auto(
         report_reason=report.report_reason,
     )
 
-    if open_related_reports_put_under_review_message:
-        return {
-            "message": message,
-            "detail": moderator_note_full,
-            "additional_message": open_related_reports_put_under_review_message,
-        }
-
-    return {
+    # response
+    response = {
         "message": message,
         "detail": moderator_note_full,
     }
+
+    if open_related_reports_put_under_review_message:
+        response["additional_message"] = open_related_reports_put_under_review_message
+
+    return response
 
 
 # use this mainly for account reports
@@ -1152,6 +1218,7 @@ def enforce_report_action_manual(
     action_request: admin_schema.EnforceReportActionManual,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -1290,6 +1357,7 @@ def enforce_report_action_manual(
                     case_number_list=open_related_reports_case_numbers
                 ),
                 db=db,
+                logger=logger,
                 current_employee=current_employee,
                 is_func_call=True,
             )
@@ -1338,20 +1406,8 @@ def enforce_report_action_manual(
         score_type = "post_score"
         curr_score = user_guideline_violation_score.post_score
 
-    # adjust the scores if action entry violation score is larger than current final violation score, difference is added to the content score
-    if curr_final_violation_score < min_req_violation_score:
-        new_final_violation_score = min_req_violation_score
-        difference_score = min_req_violation_score - curr_final_violation_score
-        new_content_score = curr_score + difference_score
-        new_last_added_score = difference_score
-    else:
-        new_final_violation_score = curr_final_violation_score
-        new_content_score = curr_score
-        new_last_added_score = 0
-
-    # update user_restrict_ban_detail, user_content_report_detail, user_content_report_event_timeline using trigger, guideline_violation_score and user tables
-    # handle other under review reports if any, related to this content report, they need to be closed
-    # ban/falg the content
+    # print(curr_final_violation_score)
+    # print(min_req_violation_score)
 
     # get all restrict/ban entries for a user
     user_all_restrict_ban_query = admin_service.get_all_user_restrict_ban_query(
@@ -1393,7 +1449,48 @@ def enforce_report_action_manual(
     # no active restrict/ban
     elif not user_active_restrict_ban:
         is_active = True
-        enforce_action_at = func.now()
+        enforce_action_at = datetime.now().astimezone()
+
+    # based on the active and future restricts/bans calculate the difference score
+    if user_future_restrict_ban:
+        # get the last added score of the latest future restrict/ban
+        user_future_restrict_ban_last_added_score = admin_service.get_last_added_score(
+            score_id=user_guideline_violation_score.id,
+            report_id=user_future_restrict_ban.report_id,
+            db_session=db,
+            is_added=False,
+        )
+        if not user_future_restrict_ban_last_added_score:
+            raise HTTPException(
+                http_status.HTTP_404_NOT_FOUND,
+                detail="Latest future restrict/ban last added score not found",
+            )
+
+        latest_future_restrict_ban_last_added_score = (
+            user_future_restrict_ban_last_added_score.last_added_score
+        )
+
+        # adjust the scores if action entry violation score is larger than (current final violation score + latest future restrict/ban last added score), difference is added to the content score
+        new_final_violation_score, new_content_score, new_last_added_score, diff = (
+            basic_utils.adjust_violation_scores(
+                curr_final_violation_score=(
+                    curr_final_violation_score
+                    + latest_future_restrict_ban_last_added_score
+                ),
+                min_req_violation_score=min_req_violation_score,
+                curr_score=curr_score,
+            )
+        )
+
+    else:
+        # adjust the scores if action entry violation score is larger than current final violation score, difference is added to the content score
+        new_final_violation_score, new_content_score, new_last_added_score, diff = (
+            basic_utils.adjust_violation_scores(
+                curr_final_violation_score=curr_final_violation_score,
+                min_req_violation_score=min_req_violation_score,
+                curr_score=curr_score,
+            )
+        )
 
     new_user_restrict_ban = admin_model.UserRestrictBanDetail(
         status=action_request.action,
@@ -1406,7 +1503,13 @@ def enforce_report_action_manual(
         enforce_action_at=enforce_action_at,
     )
 
+    # update user_restrict_ban_detail, user_content_report_detail, user_content_report_event_timeline using trigger, guideline_violation_score and user tables
+    # handle other under review reports if any, related to this content report, they need to be closed
+    # ban/flag the content
     try:
+        # add restrict/ban entry
+        db.add(new_user_restrict_ban)
+
         # handled seperately
         # ban the contents flagged by manual/auto process, if reported_item_type is account
         if (
@@ -1456,16 +1559,16 @@ def enforce_report_action_manual(
                 new_final_violation_score % number_of_valid_flagged_posts
             )
             score_adjust = abs(number_of_valid_flagged_posts - score_remainder_adjust)
-            new_final_violation_score = new_final_violation_score + score_adjust
+            new_final_violation_score = (
+                (new_final_violation_score + score_adjust)
+                if diff
+                else new_final_violation_score
+            )
             new_content_score = (
-                new_content_score + score_adjust
-                if new_content_score != curr_score
-                else new_content_score
+                new_content_score + score_adjust if diff else new_content_score
             )
             new_last_added_score = (
-                new_last_added_score + score_adjust
-                if new_last_added_score != 0
-                else new_last_added_score
+                new_last_added_score + score_adjust if diff else new_last_added_score
             )
 
         # if active action
@@ -1558,14 +1661,10 @@ def enforce_report_action_manual(
                     related_report.status = "CSD"
                     related_report.moderator_note = "RF"
 
-        # add restrict/ban entry and update user status if needed
         # user status is updated at the end
-        db.add(new_user_restrict_ban)
-
         # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or (user is deactivated/inactive and action is PBN and status is not PDH), else don't update
-        if (
-            is_active
-            and not user_deactivated_inactive
+        if is_active and (
+            not user_deactivated_inactive
             or (
                 user_deactivated_inactive
                 and action_request.action == "PBN"
@@ -1576,6 +1675,8 @@ def enforce_report_action_manual(
             #     {"status": action_duration[0]}, synchronize_session=False
             # )
             reported_user.status = action_request.action
+
+        db.commit()
 
         # send email if action status is TBN/PBN and active action
         if is_active and action_request.action in ("TBN", "PBN"):
@@ -1603,20 +1704,30 @@ def enforce_report_action_manual(
 
             email_utils.send_email(email_subject, email_details, background_tasks)
 
-        db.commit()
+    except HTTPException as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise exc
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing enforce action request",
         ) from exc
-    except Exception as exc:
-        print(exc)
+    except ConnectionErrors as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error sending email.",
+            detail="Error sending mail",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     moderator_note_full = map_utils.create_violation_moderator_notes(
@@ -1628,17 +1739,17 @@ def enforce_report_action_manual(
     )
 
     message = f"Request processed successfully. Requested action taken. Report case number {action_request.case_number} resolved."
-    if open_related_reports_put_under_review_message:
-        return {
-            "message": message,
-            "detail": moderator_note_full,
-            "additional_message": open_related_reports_put_under_review_message,
-        }
 
-    return {
+    # response
+    response = {
         "message": message,
         "detail": moderator_note_full,
     }
+
+    if open_related_reports_put_under_review_message:
+        response["additional_message"] = open_related_reports_put_under_review_message
+
+    return response
 
 
 # reports admin dashboard
@@ -1791,6 +1902,20 @@ def get_requested_appeal(
             status_code=http_status.HTTP_404_NOT_FOUND, detail="Appeal not found"
         )
 
+    # if appeal is OPN and unassigned then only content admin can view it
+    if (
+        requested_appeal.status == "OPN"
+        and (not requested_appeal.moderator_id)
+        and (
+            current_employee.type
+            not in map_utils.transform_access_role(value="content_admin")
+        )
+    ):
+        raise HTTPException(
+            status_code=http_status.HTTP_401_UNAUTHORIZED,
+            detail="Not authorized to access requested resource",
+        )
+
     # we create the dict and then parse it using overriding parse_obj function on AppealResponse schema
     requested_appeal_data = {
         "case_number": requested_appeal.case_number,
@@ -1895,6 +2020,7 @@ def get_all_related_open_appeals_for_specific_appeal(
 def selected_appeals_under_review_update(
     appeals_request: admin_schema.AppealUnderReviewUpdate,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -1934,7 +2060,22 @@ def selected_appeals_under_review_update(
             )
             valid_appeals.append(case_no)
 
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing select appeals review request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
 
     if is_func_call:
         return valid_appeals
@@ -1969,6 +2110,7 @@ def selected_appeals_under_review_update(
 def selected_appeals_assign_update(
     appeals_request: admin_schema.AppealAssignUpdate,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -2019,23 +2161,30 @@ def selected_appeals_assign_update(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing select appeals assign request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     # if not func call
     if valid_appeals:
         messages.append(
-            f"{len(valid_appeals)} appeal(s), case number(s): {valid_appeals} is/are assigned to {moderator.id}"
+            f"{len(valid_appeals)} appeal(s), case number(s): {valid_appeals} is/are assigned to {moderator.emp_id}"
         )
     else:
-        messages.append("No valid appeals to mark for review")
+        messages.append(f"No valid appeals assign to {moderator.emp_id}")
 
     if invalid_appeals:
         errors.append(
-            f"{len(invalid_appeals)} appeal(s), case number(s): {invalid_appeals} could not be assigned to {moderator.id} due to internal error. These appeal(s) might already be closed/resolved by concerned moderators"
+            f"{len(invalid_appeals)} appeal(s), case number(s): {invalid_appeals} could not be assigned to {moderator.emp_id} due to internal error. These appeal(s) might already be closed/resolved by concerned moderators"
         )
 
     if already_assign_appeals:
@@ -2054,6 +2203,7 @@ def selected_appeals_assign_update(
 def check_appeal_policy(
     case_number: int,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -2065,8 +2215,10 @@ def check_appeal_policy(
         db_session=db,
     )
 
-    message = None
-    detail = None
+    # default success message and detail
+    message = f"Appeal policy check: Success. Appeal case number: {case_number}"
+    detail = "Everything in order. Proceed with further action."
+
     # get the appeal entry
     appeal_entry = admin_service.get_an_appeal(
         case_number=case_number, status_in_list=None, db_session=db
@@ -2135,6 +2287,8 @@ def check_appeal_policy(
             appeal_entry.is_policy_followed = False
             message = f"Appeal policy check: Failed. Appeal case number: {case_number}."
             detail = f"Appeals previously linked to {len(posts_appeal_reject)} out of {len(valid_flagged_content_posts_ids)} post(s) associated with the account report is/are already rejected. Hence the appeal for revoking the restriction or ban on account stands rejected."
+        else:
+            appeal_entry.is_policy_followed = True
 
     elif appeal_entry.content_type == "account" and (
         restrict_ban_entry and restrict_ban_entry.content_type in ("post", "comment")
@@ -2152,6 +2306,8 @@ def check_appeal_policy(
             appeal_entry.is_policy_followed = False
             message = f"Appeal policy check: Failed. Appeal case number: {case_number}"
             detail = f"Appeal previously linked to a {content_appeal_reject.content_type} associated with the account report is already rejected. Hence the appeal for revoking the restriction or ban on account stands rejected."
+        else:
+            appeal_entry.is_policy_followed = True
 
     elif appeal_entry.content_type == "post" and (
         restrict_ban_entry and restrict_ban_entry.content_type == "account"
@@ -2169,6 +2325,8 @@ def check_appeal_policy(
             appeal_entry.is_policy_followed = False
             message = f"Appeal policy check: Failed. Appeal case number: {case_number}"
             detail = "Appeal previously linked to account associated with the post report is already rejected. Hence the appeal for revoking the ban on post stands rejected."
+        else:
+            appeal_entry.is_policy_followed = True
 
     elif appeal_entry.content_type in ("post", "comment") and (
         restrict_ban_entry and restrict_ban_entry.content_type in ("post", "comment")
@@ -2186,13 +2344,35 @@ def check_appeal_policy(
             appeal_entry.is_policy_followed = False
             message = f"Appeal policy check: Failed. Appeal case number: {case_number}"
             detail = f"Appeal previously linked to account associated with the {restrict_ban_entry.content_type} report is already rejected. Hence the appeal for revoking the ban on {restrict_ban_entry.content_type} stands rejected."
+        else:
+            appeal_entry.is_policy_followed = True
 
     else:
-        appeal_entry.is_policy_followed = True
-        message = f"Appeal policy check: Success. Appeal case number: {case_number}"
-        detail = "Everything in order. Proceed with further action."
+        logger.error(
+            "Unexpected combination of appeal or restrict/ban content types",
+            exc_info=True,
+        )
+        raise HTTPException(
+            http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected combination of appeal or restrict/ban content types.",
+        )
 
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error processing check appeal policy request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
 
     return {"message": message, "detail": detail}
 
@@ -2203,6 +2383,7 @@ def close_appeal(
     case_number: int,
     close_request: admin_schema.CloseAppeal,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -2271,6 +2452,7 @@ def close_appeal(
                         case_number_list=open_related_appeals_case_numbers
                     ),
                     db=db,
+                    logger=logger,
                     current_employee=current_employee,
                     is_func_call=True,
                 )
@@ -2285,10 +2467,17 @@ def close_appeal(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing close appeal request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     moderator_note_full = map_utils.create_appeal_moderator_notes(
@@ -2319,7 +2508,9 @@ def close_appeal(
 @auth_utils.authorize(["content_admin", "content_mgmt"])
 def appeal_action(
     action_request: admin_schema.AppealAction,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
     ),
@@ -2427,85 +2618,129 @@ def appeal_action(
         db_session=db,
     )
 
-    if action_request.action == "accept":
-        appeal_entry.status = "ACP"
-
-        # add the appeal accept operations function here
-        operation_utils.operations_after_appeal_accept(
-            user_id=appeal_entry.user_id,
-            report_id=appeal_entry.report_id,
-            appeal_content_id=appeal_entry.content_id,
-            appeal_content_type=appeal_entry.content_type,
-            restrict_ban_content_id=(
-                restrict_ban_entry.content_id if restrict_ban_entry else None
-            ),
-            restrict_ban_content_type=(
-                restrict_ban_entry.content_type if restrict_ban_entry else None
-            ),
-            restrict_ban_status=(
-                restrict_ban_entry.status if restrict_ban_entry else None
-            ),
-            restrict_ban_is_active=(
-                restrict_ban_entry.is_active if restrict_ban_entry else None
-            ),
-            db=db,
-        )
-
-        # add related appeals logic
-        related_appeals = related_appeals_query.filter(
-            admin_model.UserContentRestrictBanAppealDetail.is_policy_followed == True
-        ).all()
-        if related_appeals:
-            for appeal in related_appeals:
-                appeal.status = "ACR"
-                appeal.moderator_note = action_request.moderator_note
-
-    elif action_request.action == "reject":
-        appeal_entry.status = "REJ"
-
-        # add the appeal reject operations function here
-        operation_utils.operations_after_accept_reject(
-            user_id=appeal_entry.user_id,
-            report_id=appeal_entry.report_id,
-            appeal_content_id=appeal_entry.content_id,
-            appeal_content_type=appeal_entry.content_type,
-            restrict_ban_content_id=(
-                restrict_ban_entry.content_id if restrict_ban_entry else None
-            ),
-            restrict_ban_content_type=(
-                restrict_ban_entry.content_type if restrict_ban_entry else None
-            ),
-            restrict_ban_status=(
-                restrict_ban_entry.status if restrict_ban_entry else None
-            ),
-            restrict_ban_enforce_action_at=(
-                restrict_ban_entry.enforce_action_at if restrict_ban_entry else None
-            ),
-            db=db,
-        )
-
-        # add related appeals logic
-        related_appeals = related_appeals_query.filter(
-            admin_model.UserContentRestrictBanAppealDetail.is_policy_followed
-            is not None
-        ).all()
-        if related_appeals:
-            for appeal in related_appeals:
-                appeal.status = "RJR"
-                appeal.moderator_note = action_request.moderator_note
-    else:
-        raise HTTPException(
-            status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail="Invalid action",
-        )
     try:
+        send_mail = None
+        consecutive_violation = None
+        if action_request.action == "accept":
+            appeal_entry.status = "ACP"
+            appeal_entry.moderator_note = action_request.moderator_note
+
+            # add the appeal accept operations function here
+            consecutive_violation, send_mail = (
+                operation_utils.operations_after_appeal_accept(
+                    user_id=appeal_entry.user_id,
+                    report_id=appeal_entry.report_id,
+                    appeal_content_id=appeal_entry.content_id,
+                    appeal_content_type=appeal_entry.content_type,
+                    restrict_ban_content_id=(
+                        restrict_ban_entry.content_id if restrict_ban_entry else None
+                    ),
+                    restrict_ban_content_type=(
+                        restrict_ban_entry.content_type if restrict_ban_entry else None
+                    ),
+                    restrict_ban_status=(
+                        restrict_ban_entry.status if restrict_ban_entry else None
+                    ),
+                    restrict_ban_is_active=(
+                        restrict_ban_entry.is_active if restrict_ban_entry else None
+                    ),
+                    db=db,
+                )
+            )
+
+            # add related appeals logic
+            related_appeals = related_appeals_query.filter(
+                admin_model.UserContentRestrictBanAppealDetail.is_policy_followed
+                == True
+            ).all()
+            if related_appeals:
+                for appeal in related_appeals:
+                    appeal.status = "ACR"
+                    appeal.moderator_note = action_request.moderator_note
+
+        elif action_request.action == "reject":
+            appeal_entry.status = "REJ"
+            appeal_entry.moderator_note = action_request.moderator_note
+
+            # add the appeal reject operations function here
+            operation_utils.operations_after_appeal_reject(
+                user_id=appeal_entry.user_id,
+                report_id=appeal_entry.report_id,
+                appeal_content_id=appeal_entry.content_id,
+                appeal_content_type=appeal_entry.content_type,
+                restrict_ban_content_id=(
+                    restrict_ban_entry.content_id if restrict_ban_entry else None
+                ),
+                restrict_ban_content_type=(
+                    restrict_ban_entry.content_type if restrict_ban_entry else None
+                ),
+                restrict_ban_status=(
+                    restrict_ban_entry.status if restrict_ban_entry else None
+                ),
+                restrict_ban_enforce_action_at=(
+                    restrict_ban_entry.enforce_action_at if restrict_ban_entry else None
+                ),
+                db=db,
+            )
+
+            # add related appeals logic
+            related_appeals = related_appeals_query.filter(
+                admin_model.UserContentRestrictBanAppealDetail.is_policy_followed
+                is not None
+            ).all()
+            if related_appeals:
+                for appeal in related_appeals:
+                    appeal.status = "RJR"
+                    appeal.moderator_note = action_request.moderator_note
+        else:
+            raise HTTPException(
+                status_code=http_status.HTTP_400_BAD_REQUEST,
+                detail="Invalid action",
+            )
+
         db.commit()
+
+        if consecutive_violation and send_mail:
+            # appeal link
+            appeal_link = "https://vpkonnect.in/accounts/appeals/form_ban"
+            email_subject = "VPKonnect - Account Ban"
+            email_details = admin_schema.SendEmail(
+                template=(
+                    "permanent_ban_email.html"
+                    if consecutive_violation.status == "PBN"
+                    else "temporary_ban_email.html"
+                ),
+                email=[EmailStr(appeal_user.email)],
+                body_info={
+                    "username": appeal_user.username,
+                    "link": appeal_link,
+                    "days": consecutive_violation.duration // 24,
+                    "ban_enforced_datetime": consecutive_violation.enforce_action_at.strftime(
+                        "%b %d, %Y %H:%M %Z"
+                    ),
+                    "logo": basic_utils.image_to_base64(Path("vpkonnect.png")),
+                },
+            )
+
+            email_utils.send_email(email_subject, email_details, background_tasks)
+
+    except HTTPException as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise exc
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing appeal action request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     moderator_note_full = map_utils.create_appeal_moderator_notes(
@@ -2638,7 +2873,7 @@ def get_all_user_posts(
         "removed",
         "flagged_banned",
     ] = Query(),
-    limit: int = Query(1, le=12),
+    limit: int = Query(3, le=12),
     last_post_id: UUID = Query(None),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
@@ -2673,7 +2908,7 @@ def get_all_user_posts(
 
     if not all_posts:
         if last_post_id:
-            return {"message": "No more posts available"}
+            return {"message": "No more posts available", "info": "Done"}
 
         return {"message": "No posts yet"}
 

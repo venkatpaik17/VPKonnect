@@ -38,7 +38,7 @@ def get_supervisor_id_from_supervisor_emp_id(
         db_session.query(employee_model.Employee.id)
         .filter(
             employee_model.Employee.emp_id == supervisor_emp_id,
-            employee_model.Employee.status.in_(["SUP", "TER"]),
+            employee_model.Employee.status.notin_(["SUP", "TER"]),
             employee_model.Employee.is_deleted == False,
         )
         .scalar()

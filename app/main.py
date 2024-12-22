@@ -1,3 +1,7 @@
+import json
+import logging.config
+from pathlib import Path
+
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -5,13 +9,16 @@ from fastapi import Cookie, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from app.api.v0 import api_routes
 from app.config.app import settings
 from app.db.db_sqlalchemy import Base, engine
 from app.models import admin, auth, comment, post, user
 from app.utils import auth as auth_utils
+from app.utils import event
 from app.utils import job_task as job_task_utils
+from app.utils import log as log_utils
 from app.utils import map as map_utils
 from app.utils.exception import CustomValidationError, TokenExpiredSignatureError
 
@@ -41,6 +48,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# setup logging using dictConfig and json
+config_file = Path("app/config/log_config.json")
+print(config_file)
+with open(config_file) as f:
+    config = json.load(f)
+
+logging.config.dictConfig(config=config)
+
+
+@app.middleware("http")
+async def log_request(request: Request, call_next):
+    response = await call_next(request)
+    response.background = BackgroundTask(log_utils.write_log_data, request, response)
+    return response
 
 
 @app.exception_handler(CustomValidationError)
@@ -112,7 +134,7 @@ def scheduler_init():
     )
     scheduler.add_job(
         func=job_task_utils.delete_user_after_permanent_ban_appeal_limit_expiry,
-        trigger=IntervalTrigger(seconds=3),
+        trigger=IntervalTrigger(seconds=5),
     )
     scheduler.add_job(
         func=job_task_utils.delete_content_after_ban_appeal_limit_expiry,
@@ -141,17 +163,34 @@ def refresh_request(refresh_token: str, url: str):
         print("Request sent successfully")
 
         response_json = response.json()
+        json_response = JSONResponse(
+            content=response_json, status_code=response.status_code
+        )
+
+        if response.cookies:
+            cookie_value = response.cookies.get("refresh_token")
+            if not cookie_value:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Refresh token not set",
+                )
+
+            json_response.set_cookie(
+                key="refresh_token", value=cookie_value, httponly=True, secure=True
+            )
+
     except requests.Timeout as exc:
         raise HTTPException(
             status_code=status.HTTP_408_REQUEST_TIMEOUT,
             detail="Request is timed out",
         ) from exc
     except requests.HTTPError as err:
+        print(err.response.json())
         raise err
     except requests.RequestException as exc:
         raise exc
 
-    return JSONResponse(content=response_json, status_code=response.status_code)
+    return json_response
 
 
 @app.get(settings.api_prefix + "/")

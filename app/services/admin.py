@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, asc, case, func, or_
+from sqlalchemy import and_, asc, case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import admin as admin_model
@@ -22,9 +22,13 @@ def get_all_reports_by_status_moderator_id_reported_at(
         admin_model.UserContentReportDetail.is_deleted == False,
     )
 
-    if type_ == "new":
-        query = query.filter(admin_model.UserContentReportDetail.moderator_id.is_(None))
-    elif moderator_id:
+    query = query.filter(
+        admin_model.UserContentReportDetail.moderator_id.is_(None)
+        if type_ == "new"
+        else admin_model.UserContentReportDetail.moderator_id.is_not(None)
+    )
+
+    if moderator_id:
         query = query.filter(
             admin_model.UserContentReportDetail.moderator_id == moderator_id
         )
@@ -354,6 +358,24 @@ def get_account_report_flagged_content_entry_valid_flagged_content_id(
     )
 
 
+def get_account_report_flagged_content_entry_valid_flagged_content_id_report_id(
+    content_id: UUID, report_id: UUID, db_session: Session
+):
+    stmt = select(
+        exists().where(
+            admin_model.AccountReportFlaggedContent.valid_flagged_content == content_id,
+            admin_model.AccountReportFlaggedContent.report_id == report_id,
+            admin_model.AccountReportFlaggedContent.is_deleted == False,
+        )
+    )
+
+    result = db_session.execute(stmt).fetchone()
+    if result:
+        return result[0]
+
+    return False
+
+
 def check_permanent_ban_appeal_limit_expiry_query(db_session: Session):
     return db_session.query(admin_model.UserRestrictBanDetail).filter(
         admin_model.UserRestrictBanDetail.status == "PBN",
@@ -477,11 +499,13 @@ def get_all_appeals_by_status_moderator_id_reported_at(
         admin_model.UserContentRestrictBanAppealDetail.is_deleted == False,
     )
 
-    if type_ == "new":
-        query = query.filter(
-            admin_model.UserContentRestrictBanAppealDetail.moderator_id.is_(None)
-        )
-    elif moderator_id:
+    query = query.filter(
+        admin_model.UserContentRestrictBanAppealDetail.moderator_id.is_(None)
+        if type_ == "new"
+        else admin_model.UserContentRestrictBanAppealDetail.moderator_id.is_not(None)
+    )
+
+    if moderator_id:
         query = query.filter(
             admin_model.UserContentRestrictBanAppealDetail.moderator_id == moderator_id
         )
@@ -625,7 +649,12 @@ def get_user_violation_details(user_id: UUID, db_session: Session):
                 case(
                     [
                         (
-                            admin_model.UserRestrictBanDetail.id.is_(None),
+                            and_(
+                                admin_model.UserRestrictBanDetail.id.is_(None),
+                                admin_model.UserContentReportDetail.status.in_(
+                                    ["RSD", "FRS"]
+                                ),
+                            ),
                             admin_model.UserContentReportDetail.id,
                         )
                     ],

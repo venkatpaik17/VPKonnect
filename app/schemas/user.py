@@ -20,29 +20,31 @@ class UserBase(BaseModel):
     def validate_username(cls, value):
         # Validation pattern for username
         pattern = r"^(?![.]+$)(?![_]+$)(?![\d]+$)(?![._]+$)(?!^[.])(?!.*\.{2,})[a-zA-Z0-9_.]{1,30}$"
-        invalid_username_message = (
-            "Invalid Username\n\n"
-            "Your username must meet the following criteria:\n"
-            "- Must be between 1 and 30 characters long.\n"
-            "- Can include letters (a-z, A-Z), digits (0-9), underscores (_), and periods (.).\n"
-            "- Cannot contain consecutive periods (..).\n"
-            "- Cannot start with a period (.).\n"
-            "- Cannot consist solely of periods (.) or underscores (_), or digits only.\n"
-            "- Cannot consist solely of periods and underscores or start with them.\n\n"
-            "Examples of invalid usernames:\n"
-            "- `....` (consists only of periods)\n"
-            "- `___` (consists only of underscores)\n"
-            "- `12345` (consists only of digits)\n"
-            "- `._._` (consists only of periods and underscores)\n"
-            "- `.username` (starts with a period)\n"
-            "- `user..name` (contains consecutive periods)\n\n"
-            "Please update your username to meet these requirements."
-        )
+        invalid_username_message = """
+            Invalid Username!!!
+            Your username must meet the following criteria:
+            - Must be between 1 and 30 characters long.
+            - Can include letters (a-z, A-Z), digits (0-9), underscores (_), and periods (.).
+            - Cannot contain consecutive periods (..).
+            - Cannot start with a period (.).
+            - Cannot consist solely of periods (.) or underscores (_), or digits only.
+            - Cannot consist solely of periods and underscores.
+            Examples of invalid usernames:
+            - .... (consists only of periods)
+            - ___ (consists only of underscores)
+            - 12345 (consists only of digits)
+            - ._._ (consists only of periods and underscores)
+            - .username (starts with a period)
+            - user..name (contains consecutive periods)
+            Please update your username to meet these requirements.
+        """
+
+        message_lines = [
+            line.strip() for line in invalid_username_message.strip().split("\n")
+        ]
 
         if not re.match(pattern, value):
-            raise CustomValidationError(
-                status_code=400, detail=invalid_username_message
-            )
+            raise CustomValidationError(status_code=400, detail=message_lines)
 
         # Convert username to lowercase
         return value.lower()
@@ -85,27 +87,30 @@ class UserRegister(UserBase):
         pattern = (
             r"^(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+={[}\]|:;\"'<,>.?/]).{8,48}$"
         )
-        invalid_password_message = (
-            "Invalid Password\n\n"
-            "Your password must meet the following criteria:\n"
-            "- At least 8 characters long (and no more than 48 characters).\n"
-            "- Contains at least one uppercase letter (A-Z).\n"
-            "- Contains at least one digit (0-9).\n"
-            "- Contains at least one special character from the following set: `!@#$%^&*()_+-={}[]|:;\"'<,>.?/`.\n\n"
-            "Examples of invalid passwords:\n"
-            "- `password` (missing uppercase letter, digit, and special character)\n"
-            "- `P@ssword` (missing digit)\n"
-            "- `12345678` (missing uppercase letter and special character)\n"
-            "- `PASSWORD123` (missing special character)\n"
-            "- `password!` (missing uppercase letter and digit)\n"
-            "- `Pass123` (too short, missing special character)\n"
-            "- `P@ss12345678901234567890123456789012345678901234` (too long, exceeds 48 characters)\n\n"
-            "Please update your password to meet these requirements."
-        )
+        invalid_password_message = """
+            Invalid Password!!!
+            Your password must meet the following criteria:
+            - At least 8 characters long (and no more than 48 characters).
+            - Contains at least one uppercase letter (A-Z).
+            - Contains at least one digit (0-9).
+            - Contains at least one special character from the following set: `!@#$%^&*()_+-={}[]|:;\"'<,>.?/`.
+            Examples of invalid passwords:
+            - password (missing uppercase letter, digit, and special character)
+            - P@ssword (missing digit)
+            - 12345678 (missing uppercase letter and special character)
+            - PASSWORD123 (missing special character)
+            - password! (missing uppercase letter and digit)
+            - Pass123 (too short, missing special character)
+            - P@ss123456789012345678901234567890123456789012345 (too long, exceeds 48 characters)
+            Please update your password to meet these requirements.
+        """
+
+        message_lines = [
+            line.strip() for line in invalid_password_message.strip().split("\n")
+        ]
+
         if not re.match(pattern, value):
-            raise CustomValidationError(
-                status_code=400, detail=invalid_password_message
-            )
+            raise CustomValidationError(status_code=400, detail=message_lines)
 
         return value
 
@@ -158,10 +163,31 @@ class UserUsernameChange(BaseModel):
         # Validation pattern for username
         pattern = r"^(?![.]+$)(?![_]+$)(?![\d]+$)(?![._]+$)(?!^[.])(?!.*\.{2,})[a-zA-Z0-9_.]{1,30}$"
 
+        invalid_username_message = """
+            Invalid Username!!!
+            Your username must meet the following criteria:
+            - Must be between 1 and 30 characters long.
+            - Can include letters (a-z, A-Z), digits (0-9), underscores (_), and periods (.).
+            - Cannot contain consecutive periods (..).
+            - Cannot start with a period (.).
+            - Cannot consist solely of periods (.) or underscores (_), or digits only.
+            - Cannot consist solely of periods and underscores.
+            Examples of invalid usernames:
+            - .... (consists only of periods)
+            - ___ (consists only of underscores)
+            - 12345 (consists only of digits)
+            - ._._ (consists only of periods and underscores)
+            - .username (starts with a period)
+            - user..name (contains consecutive periods)
+            Please update your username to meet these requirements.
+        """
+
+        message_lines = [
+            line.strip() for line in invalid_username_message.strip().split("\n")
+        ]
+
         if not re.match(pattern, value):
-            raise CustomValidationError(
-                status_code=400, detail=f"Invalid username: {value}"
-            )
+            raise CustomValidationError(status_code=400, detail=message_lines)
 
         # Convert username to lowercase
         return value.lower()
@@ -198,8 +224,8 @@ class UserSendVerifyEmail(BaseModel):
 
 class UserContentReport(BaseModel):
     username: str
-    item_id: UUID | None
     item_type: Literal["post", "comment", "account"]
+    item_id: UUID | None
     reason: str
     reason_username: str | None
 

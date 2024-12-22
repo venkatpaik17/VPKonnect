@@ -114,13 +114,17 @@ def get_user_by_username_admin(
     status_not_in_list: list[str] | None,
     db_session: Session,
 ):
-    return db_session.query(user_model.User).filter(
-        user_model.User.username == username,
-        (
-            user_model.User.status.notin_(status_not_in_list)
-            if status_not_in_list
-            else True
-        ),
+    return (
+        db_session.query(user_model.User)
+        .filter(
+            user_model.User.username == username,
+            (
+                user_model.User.status.notin_(status_not_in_list)
+                if status_not_in_list
+                else True
+            ),
+        )
+        .first()
     )
 
 

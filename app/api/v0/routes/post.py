@@ -1,3 +1,4 @@
+from logging import Logger
 from typing import Literal
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from app.services import user as user_service
 from app.utils import auth as auth_utils
 from app.utils import basic as basic_utils
 from app.utils import image as image_utils
+from app.utils import log as log_utils
 
 router = APIRouter(prefix=settings.api_prefix + "/posts", tags=["Posts"])
 
@@ -35,9 +37,9 @@ def create_post(
     post_type: Literal["publish", "draft"] = Query(),
     caption=Form(None),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
-    print("Hello")
     # request schema
     post_request = post_schema.PostCreate(post_type=post_type, caption=caption)
 
@@ -55,17 +57,27 @@ def create_post(
             detail="Cannot create new post, user is under full restriction",
         )
 
-    # posts folder
-    posts_subfolder = image_folder / "user" / str(curr_auth_user.repr_id) / "posts"
-
-    # image validation and handling
-    image_name, image_path = image_utils.handle_image_operations(
-        username=curr_auth_user.username,
-        target_folder=posts_subfolder,
-        image=image,
-    )
-
+    image_path = None
     try:
+        # image validation and handling
+        image_name = image_utils.validate_image_generate_name(
+            username=curr_auth_user.username,
+            image=image,
+            logger=logger,
+        )
+
+        # posts folder
+        posts_subfolder = image_folder / "user" / str(curr_auth_user.repr_id) / "posts"
+
+        image_path = posts_subfolder / image_name
+
+        # write image to target folder
+        image_utils.write_image(
+            image=image,
+            image_path=image_path,
+            logger=logger,
+        )
+
         new_post = post_model.Post(
             status=post_request.post_type,
             caption=post_request.caption,
@@ -75,20 +87,24 @@ def create_post(
 
         db.add(new_post)
         db.commit()
+
     except SQLAlchemyError as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         image_utils.remove_image(path=image_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating post",
         ) from exc
+    except HTTPException as exc:
+        raise exc
     except Exception as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         image_utils.remove_image(path=image_path)
-        print(exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating post",
+            detail=str(exc),
         ) from exc
 
     db.refresh(new_post)
@@ -155,7 +171,9 @@ def get_post(
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Post owner not found"
         )
-    print(post_user.status)
+    # print(post_user.status)
+    # print(post.status)
+    # print(post.id)
     if post_user.status in ("DAH", "PDH", "PBN", "PDB", "PDI", "DEL"):
         return RedirectResponse(
             settings.api_prefix + "/users/" + str(post_user.username) + "/profile",
@@ -231,6 +249,7 @@ def edit_post(
     caption: str = Form(None),
     image: UploadFile | None = None,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # request
@@ -299,63 +318,83 @@ def edit_post(
             detail=f"Post type mismatch. Post to be {edit_request.action}ed is a draft post, not a published post",
         )
 
-    image_name = str()
     posts_subfolder = None
-    image_path = None
     old_image = post.image
-    if image:
-        # posts folder
-        posts_subfolder = image_folder / "user" / str(curr_auth_user.repr_id) / "posts"
+    image_path = None
 
-        # image validation and handling
-        image_name, image_path = image_utils.handle_image_operations(
-            username=curr_auth_user.username,
-            target_folder=posts_subfolder,
-            image=image,
-        )
-        print(image_path)
+    try:
+        if image:
+            # image validation and name generation
+            image_name = image_utils.validate_image_generate_name(
+                username=curr_auth_user.username,
+                image=image,
+                logger=logger,
+            )
 
-    else:
-        image_name = old_image
+            # posts folder
+            posts_subfolder = (
+                image_folder / "user" / str(curr_auth_user.repr_id) / "posts"
+            )
 
-    # update the post
-    # draft publish, since published post cannot be published, handled in schema validator
-    if edit_request.action == "publish":
-        post.status = "PUB"
-        post.caption = edit_request.caption
-        post.image = image_name
+            image_path = posts_subfolder / image_name
 
-    elif edit_request.action == "edit":
-        if edit_request.post_type == "published":
+            # write image
+            image_utils.write_image(
+                image=image,
+                image_path=image_path,
+                logger=logger,
+            )
+
+        else:
+            image_name = old_image
+
+        # update the post
+        # draft publish, since published post cannot be published, handled in schema validator
+        if edit_request.action == "publish":
             post.status = "PUB"
             post.caption = edit_request.caption
             post.image = image_name
 
-        elif edit_request.post_type == "draft":
-            post.status = "DRF"
-            post.caption = edit_request.caption
-            post.image = image_name
+        elif edit_request.action == "edit":
+            if edit_request.post_type == "published":
+                post.status = "PUB"
+                post.caption = edit_request.caption
+                post.image = image_name
 
-    post.user_id = post.user_id
+            elif edit_request.post_type == "draft":
+                post.status = "DRF"
+                post.caption = edit_request.caption
+                post.image = image_name
 
-    try:
+        post.user_id = post.user_id
+
         db.commit()
 
-        # if draft has updated image and everything is completed without error, delete old image of draft
-        if image and posts_subfolder:
-            print("Hello")
+        if image:
+            # if draft has updated image and everything is completed without error, delete old image of draft
             remove_path = posts_subfolder / old_image
-            print(remove_path)
             image_utils.remove_image(path=remove_path)
+            logger.info("Old draft image removed, path: %s", remove_path)
 
     except SQLAlchemyError as exc:
         db.rollback()
-        # remove new image of dradt
+        logger.error(exc, exc_info=True)
         if image and image_path:
             image_utils.remove_image(path=image_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error editing post",
+        ) from exc
+    except HTTPException as exc:
+        raise exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        if image and image_path:
+            image_utils.remove_image(path=image_path)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     if edit_request.post_type == "draft" and edit_request.action == "edit":
@@ -397,6 +436,7 @@ def edit_post(
 def remove_post(
     post_id: UUID,
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
@@ -447,9 +487,17 @@ def remove_post(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting post",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {
@@ -463,6 +511,7 @@ def like_unlike_post(
     post_id: UUID,
     action: Literal["like", "unlike"] = Query(),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get current user
@@ -540,10 +589,20 @@ def like_unlike_post(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error {action}ing post",
+        ) from exc
+    except HTTPException as exc:
+        db.rollback()
+        raise exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return {"message": f"Post has been {action}d successfully"}
@@ -551,7 +610,7 @@ def like_unlike_post(
 
 @router.get(
     "/{post_id}/like",
-    # response_model=dict[str, list[post_schema.LikeUserResponse] | UUID | str],
+    response_model=dict[str, list[post_schema.LikeUserResponse] | UUID | str],
 )
 @auth_utils.authorize(["user"])
 def get_post_like_users(
@@ -596,12 +655,12 @@ def get_post_like_users(
 
     if not like_users:
         if last_like_user_id:
-            return {"message": "No more users who liked available"}
+            return {"message": "No more users who liked available", "info": "Done"}
 
         return {"message": "No users liked yet"}
 
-    print(like_users[0])
-    print(next_cursor)
+    # print(like_users[0])
+    # print(next_cursor)
 
     # like users response
     like_users_response = [
@@ -609,7 +668,7 @@ def get_post_like_users(
             profile_picture=user["profile_picture"],
             username=user["username"],
             follows_user=user["follows_user"],
-        ).dict(exclude_none=True)
+        )
         for user in like_users
     ]
 
@@ -623,6 +682,7 @@ def create_comment(
     post_id: UUID,
     content=Form(None),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
 ):
     # get the current user
@@ -673,16 +733,17 @@ def create_comment(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating post",
+            detail="Error creating comment",
         ) from exc
     except Exception as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating post",
+            detail=str(exc),
         ) from exc
 
     db.refresh(new_comment)
@@ -701,7 +762,7 @@ def create_comment(
         )
         is not None,
         tag=None,
-    ).dict(exclude_none=True)
+    )
 
     return {
         "message": f"Comment added to post (id:{post.id})",
@@ -711,7 +772,7 @@ def create_comment(
 
 @router.get(
     "/{post_id}/comments",
-    # response_model=dict[str, list[comment_schema.CommentResponse] | UUID | str],
+    response_model=dict[str, list[comment_schema.CommentResponse] | UUID | str],
 )
 @auth_utils.authorize(["user"])
 def get_all_comments(
@@ -754,7 +815,7 @@ def get_all_comments(
     )
     if not all_comments:
         if last_comment_id:
-            return {"message": "No more comments available"}
+            return {"message": "No more comments available", "info": "Done"}
 
         return {"message": "No comments yet"}
 
@@ -781,7 +842,7 @@ def get_all_comments(
             commented_time_ago=basic_utils.time_ago(comment.created_at),
             curr_user_like=comment.id in curr_user_comments_like,
             tag="flagged to be banned" if comment.status == "FLB" else None,
-        ).dict(exclude_none=True)
+        )
         for comment in all_comments
     ]
 

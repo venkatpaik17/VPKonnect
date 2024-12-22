@@ -23,7 +23,7 @@ RESET_TOKEN_EXPIRE_MINUTES = settings.reset_token_expire_minutes
 USER_VERIFY_TOKEN_SECRET_KEY = settings.user_verify_token_secret_key
 USER_VERIFY_TOKEN_EXPIRE_MINUTES = settings.user_verify_token_expire_minutes
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="(users, employees)/login")
 
 token_blacklist_cache = TTLCache(maxsize=settings.ttlcache_max_size, ttl=24 * 60 * 60)
 

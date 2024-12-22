@@ -105,7 +105,7 @@ def count_post_likes(post_id: UUID, status: str, db_session: Session):
     return (
         db_session.query(func.count(post_model.PostLike.id))
         .filter(
-            post_model.PostLike.id == post_id,
+            post_model.PostLike.post_id == post_id,
             post_model.PostLike.status == status,
             post_model.PostLike.is_deleted == False,
         )
@@ -119,7 +119,7 @@ def count_post_likes_admin(
     return (
         db_session.query(func.count(post_model.PostLike.id))
         .filter(
-            post_model.PostLike.id == post_id,
+            post_model.PostLike.post_id == post_id,
             post_model.PostLike.status.in_(status_in_list),
         )
         .scalar()

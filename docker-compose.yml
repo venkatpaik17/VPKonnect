@@ -18,6 +18,8 @@ services:
       - db
     env_file:
       - ./.app.env
+    volumes:
+      - ./app:/usr/src/app/app
     ports:
       - "8000:8000"
 

@@ -135,58 +135,68 @@ CREATE OR REPLACE FUNCTION update_user_info_status()
 RETURNS TRIGGER AS $$
 DECLARE
     user_id_param UUID;
+    action TEXT;
 BEGIN
+    IF TG_NARGS <> 1 THEN
+        RAISE EXCEPTION 'Wrong number of arguments for update_user_info_status()';
+    END IF;
+
+    action := TG_ARGV[0];
     user_id_param := OLD.id;
     
-    -- Update 'post' table
-    UPDATE post
-    SET status = CASE 
-        WHEN status = 'PUB' THEN 'HID' 
-        WHEN status = 'HID' THEN 'PUB'
-        ELSE status
-        END,
-        updated_at = NOW()
-    WHERE user_id = user_id_param;
+    IF action = 'h' THEN
+        -- Update 'post' table
+        UPDATE post
+        SET status = 'HID', updated_at = NOW()
+        WHERE user_id = user_id_param AND status = 'PUB';
 
-    -- Update 'comment' table
-    UPDATE comment
-    SET status = CASE 
-        WHEN status = 'PUB' THEN 'HID' 
-        WHEN status = 'HID' THEN 'PUB'
-        ELSE status
-        END,
-        updated_at = NOW()
-    WHERE user_id = user_id_param;
+        -- Update 'comment' table
+        UPDATE comment
+        SET status = 'HID', updated_at = NOW()
+        WHERE user_id = user_id_param AND status = 'PUB';
 
-    -- Update 'post_like' table
-    UPDATE post_like
-    SET status = CASE 
-        WHEN status = 'ACT' THEN 'HID' 
-        WHEN status = 'HID' THEN 'ACT'
-        ELSE status
-        END,
-        updated_at = NOW()
-    WHERE user_id = user_id_param;
+        -- Update 'post_like' table
+        UPDATE post_like
+        SET status = 'HID', updated_at = NOW()
+        WHERE user_id = user_id_param AND status = 'ACT';
 
-    -- Update 'comment_like' table
-    UPDATE comment_like
-    SET status = CASE 
-        WHEN status = 'ACT' THEN 'HID'
-        WHEN status = 'HID' THEN 'ACT'
-        ELSE status
-        END,
-        updated_at = NOW()
-    WHERE user_id = user_id_param;
+        -- Update 'comment_like' table
+        UPDATE comment_like
+        SET status = 'HID', updated_at = NOW()
+        WHERE user_id = user_id_param AND status = 'ACT';
 
-    -- Update 'user_follow_association' table
-    UPDATE user_follow_association
-    SET status = CASE
-        WHEN status = 'ACP' THEN 'HID'
-        WHEN status = 'HID' THEN 'ACP'
-        ELSE status
-        END,
-        updated_at = NOW()
-    WHERE follower_user_id = user_id_param OR followed_user_id = user_id_param;
+        -- Update 'user_follow_association' table
+        UPDATE user_follow_association
+        SET status = 'HID', updated_at = NOW()
+        WHERE (follower_user_id = user_id_param OR followed_user_id = user_id_param) AND status = 'ACP';
+
+    ELSIF action = 'u' THEN
+        -- Update 'post' table
+        UPDATE post
+        SET status = 'PUB', updated_at = NOW()
+        WHERE user_id = user_id_param AND status = 'HID';
+
+        -- Update 'comment' table
+        UPDATE comment
+        SET status = 'PUB', updated_at = NOW()
+        WHERE user_id = user_id_param AND status = 'HID';
+
+        -- Update 'post_like' table
+        UPDATE post_like
+        SET status = 'ACT', updated_at = NOW()
+        WHERE user_id = user_id_param AND status = 'HID';
+
+        -- Update 'comment_like' table
+        UPDATE comment_like
+        SET status = 'ACT', updated_at = NOW()
+        WHERE user_id = user_id_param AND status = 'HID';
+
+        -- Update 'user_follow_association' table
+        UPDATE user_follow_association
+        SET status = 'ACP', updated_at = NOW()
+        WHERE (follower_user_id = user_id_param OR followed_user_id = user_id_param) AND status = 'HID';
+
+    END IF;
     
     RETURN NULL;
 END;
@@ -197,13 +207,13 @@ CREATE TRIGGER user_status_update_hide_trigger
 AFTER UPDATE OF status ON "user"
 FOR EACH ROW
 WHEN ((OLD.status IN ('ACT', 'RSP', 'RSF', 'TBN') AND NEW.status IN ('DAH', 'PDH', 'PBN')) OR (OLD.status = 'INA' AND NEW.status IN ('PBN', 'PDI')))
-EXECUTE FUNCTION update_user_info_status();
+EXECUTE FUNCTION update_user_info_status('h');
 
 CREATE TRIGGER user_status_update_unhide_trigger
 AFTER UPDATE OF status ON "user"
 FOR EACH ROW
 WHEN (OLD.status IN ('DAH', 'PDH', 'PBN') AND NEW.status IN ('ACT', 'RSP', 'RSF', 'TBN'))
-EXECUTE FUNCTION update_user_info_status();
+EXECUTE FUNCTION update_user_info_status('u');
 
 
 /*Trigger for getting age for employee*/
@@ -245,14 +255,23 @@ DECLARE
     report_content_type TEXT;
     event TEXT;
     info TEXT;
-    
+    action_info TEXT;
+    user_status TEXT;
+    report_id UUID;
 BEGIN
     IF TG_NARGS <> 1 THEN
         RAISE EXCEPTION 'Wrong number of arguments for insert_report_event_timeline()';
     END IF;
     
     action := TG_ARGV[0];
-    report_content_type := OLD.reported_item_type;
+    
+    IF TG_TABLE_NAME = 'user_restrict_ban_detail' THEN
+        report_content_type := NEW.content_type;
+        report_id := NEW.report_id;
+    ELSIF TG_TABLE_NAME = 'user_content_report_detail' THEN
+        report_content_type := NEW.reported_item_type;
+        report_id := NEW.id;
+    END IF;
     
     IF action = 'SUB' THEN
         event := 'Submitted';
@@ -261,56 +280,47 @@ BEGIN
         event := 'Under Review';
         info := 'Review in progress';
     ELSIF action = 'RES' THEN
-        DECLARE
-            user_status TEXT;
-        BEGIN
-            IF report_content_type = 'account' THEN
-                SELECT status INTO user_status FROM "user_restrict_ban_detail" WHERE user_id = OLD.reported_user_id AND content_id = OLD.reported_item_id AND content_type = OLD.reported_item_type AND is_active = TRUE;
-                IF user_status IN ('RSF', 'RSP') THEN
-                    info := ' account restricted';
-                ELSIF user_status = 'TBN' THEN
-                    info := ' account temp banned';
-                ELSIF user_status = 'PBN' THEN
-                    info := ' account perm banned';
-                END IF;
-            ELSE
-                info := report_content_type || ' removed';
+        IF report_content_type = 'account' THEN
+            user_status := NEW.status;
+                
+            IF user_status IN ('RSF', 'RSP') THEN
+                info := 'account restricted';
+            ELSIF user_status = 'TBN' THEN
+                info := 'account temp banned';
+            ELSIF user_status = 'PBN' THEN
+                info := 'account perm banned';
             END IF;
-        END;
+        ELSE
+            info := report_content_type || ' removed';
+        END IF;
         event := 'Resolved';
         
     ELSIF action = 'CLS' THEN
-        DECLARE
-            action_info TEXT;
-        BEGIN
-            IF report_content_type = 'account' THEN
-                action_info := ' no action';
-            ELSE
-                IF NEW.moderator_note = 'RF' THEN
-                    action_info := ' not removed';
-                ELSIF NEW.moderator_note = 'RNB' THEN
-                    action_info := ' already banned';
-                ELSIF NEW.moderator_note = 'RNF' THEN
-                    action_info := ' already flagged for future ban';
-                ELSIF NEW.moderator_note = 'RND' THEN
-                    action_info := ' not found';
-                ELSIF NEW.moderator_note = 'RNU' THEN
-                    action_info := ' user not found';
-                ELSIF NEW.moderator_note = 'SE' THEN
-                    action_info := ' System error';
-                ELSIF NEW.moderator_note = 'UD' THEN
-                    action_info := ' user deleted';
-                END IF;
-            END IF;
-            
-            info := report_content_type || action_info;
-        END;
+        IF report_content_type = 'account' and NEW.moderator_note = 'RF' THEN
+            action_info := ' no restrict/ban';
+        ELSIF report_content_type IN ('post', 'comment') AND NEW.moderator_note = 'RF' THEN
+            action_info := ' not removed';
+        ELSIF NEW.moderator_note = 'RNB' THEN
+            action_info := ' already banned';
+        ELSIF NEW.moderator_note = 'RNF' THEN
+            action_info := ' already flagged for future ban';
+        ELSIF NEW.moderator_note = 'RND' THEN
+            action_info := ' not found';
+        ELSIF NEW.moderator_note = 'RNU' THEN
+            action_info := ' user not found';
+        ELSIF NEW.moderator_note = 'SE' THEN
+            action_info := ' System error';
+        ELSIF NEW.moderator_note = 'UD' THEN
+            action_info := ' user deleted';
+        END IF;
+        
+        info := report_content_type || action_info;
         event := 'Closed';
         
     END IF;
     
     INSERT INTO "user_content_report_event_timeline" (event_type, detail, report_id) 
-    VALUES (event, info, NEW.id);
+    VALUES (event, info, report_id);
     
     RETURN NEW;
     
@@ -332,7 +342,7 @@ EXECUTE FUNCTION insert_report_event_timeline('REV');
 CREATE TRIGGER user_content_report_resolve_event_trigger
 AFTER UPDATE OF status ON "user_content_report_detail"
 FOR EACH ROW
-WHEN (OLD.status IN ('URV', 'FRS', 'FRR') AND NEW.status IN ('RSD', 'RSR'))
+WHEN ((OLD.status IN ('URV', 'FRS', 'FRR') AND NEW.status IN ('RSD', 'RSR')) AND (OLD.reported_item_type IN ('post', 'comment')))
 EXECUTE FUNCTION insert_report_event_timeline('RES');
 
 CREATE TRIGGER user_content_report_close_event_trigger
@@ -341,6 +351,17 @@ FOR EACH ROW
 WHEN (OLD.status IN ('OPN', 'URV') AND NEW.status = 'CSD')
 EXECUTE FUNCTION insert_report_event_timeline('CLS');
 
+CREATE TRIGGER user_restrict_ban_account_resolve_insert_event_trigger
+AFTER INSERT ON "user_restrict_ban_detail"
+FOR EACH ROW
+WHEN (NEW.is_active = TRUE AND NEW.content_type = 'account')
+EXECUTE FUNCTION insert_report_event_timeline('RES');
+
+CREATE TRIGGER user_restrict_ban_account_resolve_update_event_trigger
+AFTER UPDATE OF is_active ON "user_restrict_ban_detail"
+FOR EACH ROW
+WHEN ((OLD.is_active = FALSE AND NEW.is_active = TRUE) AND OLD.content_type = 'account')
+EXECUTE FUNCTION insert_report_event_timeline('RES');
 
 
 /*function and triggers for inserting appeal events*/
@@ -353,16 +374,16 @@ DECLARE
     info TEXT;
     user_id_var UUID;
     report_id_var UUID;
-    user_status TEXT := NULL;
+    user_status TEXT;
 BEGIN
     IF TG_NARGS <> 1 THEN
         RAISE EXCEPTION 'Wrong number of arguments for insert_appeal_event_timeline()';
     END IF;
     
     action = TG_ARGV[0];
-    content_type = OLD.content_type;
-    user_id_var = OLD.user_id;
-    report_id_var = OLD.report_id;
+    content_type = NEW.content_type;
+    user_id_var = NEW.user_id;
+    report_id_var = NEW.report_id;
     
     IF action = 'SUB' THEN
         event := 'Submitted';
@@ -405,7 +426,15 @@ BEGIN
         
         event := 'Rejected';
     ELSIF action = 'CLS' THEN
-        IF NEW.moderator_note = 'ANU' THEN
+        IF NEW.moderator_note = 'AF1' THEN
+            info := 'Check policy 1 failed';
+        ELSIF NEW.moderator_note = 'AF2' THEN
+            info := 'Check policy 2 failed';
+        ELSIF NEW.moderator_note = 'AF3' THEN
+            info := 'Check policy 3 failed';
+        ELSIF NEW.moderator_note = 'AF4' THEN
+            info := 'Check policy 4 failed';
+        ELSIF NEW.moderator_note = 'ANU' THEN
             info := content_type || ' user not found';
         ELSIF NEW.moderator_note = 'ANPC' THEN
             info := content_type || ' not found';
@@ -413,6 +442,8 @@ BEGIN
             info := content_type || ' appeal expired';
         ELSIF NEW.moderator_note = 'SE' THEN
             info := content_type || ' System error';
+        ELSIF NEW.moderator_note = 'UD' THEN
+            info := content_type || ' User deleted';
         END IF;
         
         event := 'Closed';
@@ -481,7 +512,7 @@ BEGIN
             event_type := 'DDS';
         ELSIF OLD.status IN ('ACT', 'INA', 'DAH', 'PDH', 'RSF', 'TBN') AND NEW.status = 'RSP' THEN
             event_type := 'RSP';
-        ELSIF OLD.status IN ('ACT', 'INA', 'DAH', 'PDH', 'RSP', 'TBN') AND NEW.status = 'RSP' THEN
+        ELSIF OLD.status IN ('ACT', 'INA', 'DAH', 'PDH', 'RSP', 'TBN') AND NEW.status = 'RSF' THEN
             event_type := 'RSF';
         ELSIF OLD.status IN ('ACT', 'INA', 'RSP', 'RSF', 'DAH', 'PDH') AND NEW.status = 'TBN' THEN
             event_type := 'BNT';
@@ -520,7 +551,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 
-CREATE TRIGGER update_user_account_history_user_register_trigger
+CREATE TRIGGER update_user_account_history_trigger
 AFTER UPDATE OF status ON "user"
 FOR EACH ROW
 EXECUTE FUNCTION update_user_account_history('status');
@@ -557,7 +588,7 @@ BEGIN
             -- update status to CSD and moderator_note to UD in 'user_content_report_detail' table
             UPDATE user_content_report_detail
             SET status = 'CSD', moderator_note = 'UD', updated_at = NOW()
-            WHERE user_id = user_id_param AND status IN ('OPN', 'URV');
+            WHERE reporter_user_id = user_id_param AND status IN ('OPN', 'URV');
             
         END IF;
 
@@ -578,7 +609,7 @@ BEGIN
         
         -- update 'password_change_history' table
         UPDATE password_change_history
-        SET is_deleted = TRUE, updated_at = NOW()
+        SET is_deleted = TRUE
         WHERE user_id = user_id_param;
         
         -- update 'post' table
@@ -618,12 +649,12 @@ BEGIN
         
         -- update 'user_session' table
         UPDATE user_session
-        SET is_deleted = TRUE, updated_at = NOW()
+        SET is_deleted = TRUE, logout_at = NOW()
         WHERE user_id = user_id_param;
         
         -- update 'username_change_history' table
         UPDATE username_change_history
-        SET is_deleted = TRUE, updated_at = NOW()
+        SET is_deleted = TRUE
         WHERE user_id = user_id_param;
     
     ELSIF param = 2 THEN
@@ -636,7 +667,7 @@ BEGIN
         
         -- update 'account_report_flagged_content' table
         UPDATE account_report_flagged_content
-        SET is_deleted = TRUE, updated_at = NOW()
+        SET is_deleted = TRUE
         WHERE report_id = report_id_param;
     
     END IF;
@@ -660,7 +691,7 @@ EXECUTE FUNCTION delete_user_info_status(2);
 
 
 /*function and trigger for PDB, update is_ban_final to True for user posts/comments in Post and Comment tables*/
-/*Also close all open/under review reports and appeals*/
+/*Also close all open/under review reports*/
 CREATE OR REPLACE FUNCTION update_post_comment_is_ban_final()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -678,15 +709,10 @@ BEGIN
     SET is_ban_final = TRUE, updated_at = NOW()
     WHERE status = 'BAN' AND is_ban_final = FALSE AND user_id = user_id_param;
 
-    -- update status to CSD and moderator_note to UD in 'user_content_restrict_ban_appeal_detail' table
-    UPDATE user_content_restrict_ban_appeal_detail
-    SET status = 'CSD', moderator_note = 'UD', updated_at = NOW()
-    WHERE user_id = user_id_param AND status IN ('OPN', 'URV');
-
-    -- update status to CSD and moderator_note to UD in 'user_content_report_detail' table
+    -- update status to CSD and moderator_note to UDB in 'user_content_report_detail' table
     UPDATE user_content_report_detail
-    SET status = 'CSD', moderator_note = 'UD', updated_at = NOW()
-    WHERE user_id = user_id_param AND status IN ('OPN', 'URV');
+    SET status = 'CSD', moderator_note = 'UDB', updated_at = NOW()
+    WHERE reporter_user_id = user_id_param AND status IN ('OPN', 'URV');
 
     RETURN NULL;
 END;
@@ -699,14 +725,14 @@ WHEN (OLD.status = 'PBN' and NEW.status = 'PDB')
 EXECUTE FUNCTION update_post_comment_is_ban_final();
 
 
-/*update post_like and comment_like when status updates in post and comment*/
-CREATE OR REPLACE FUNCTION update_postlike_commentlike_status()
+/*update post post_like comment and comment_like when status updates in post and comment*/
+CREATE OR REPLACE FUNCTION update_post_postlike_comment_commentlike_status()
 RETURNS TRIGGER AS $$
 DECLARE
     param INTEGER;
 BEGIN
     IF TG_NARGS <> 1 THEN
-        RAISE EXCEPTION 'Wrong number of arguments for update_postlike_commentlike_status()';
+        RAISE EXCEPTION 'Wrong number of arguments for update_post_postlike_comment_commentlike_status()';
     END IF;
     
     param := TG_ARGV[0]::INTEGER;
@@ -717,15 +743,34 @@ BEGIN
             UPDATE post_like
             SET status = 'HID', updated_at = NOW()
             WHERE post_id = OLD.id AND status = 'ACT';
+
+            UPDATE comment
+            SET status = 'HID', updated_at = NOW()
+            WHERE post_id = OLD.id AND status = 'PUB';
         WHEN 2 THEN
             UPDATE post_like
             SET status = 'RMV', updated_at = NOW()
             WHERE post_id = OLD.id AND status = 'ACT';
+
+            UPDATE comment
+            SET status = 'RMV', updated_at = NOW()
+            WHERE post_id = OLD.id AND status = 'PUB';
         WHEN 3 THEN
             UPDATE post_like
             SET status = 'ACT', updated_at = NOW()
             WHERE post_id = OLD.id AND status = 'HID';
-        
+
+            UPDATE comment
+            SET status = 'PUB', updated_at = NOW()
+            WHERE post_id = OLD.id AND status = 'HID';
+        WHEN 4 THEN
+            UPDATE post_like
+            SET is_deleted = TRUE, updated_at = NOW()
+            WHERE post_id = OLD.id;
+
+            UPDATE comment
+            SET is_deleted = TRUE, updated_at = NOW()
+            WHERE post_id = OLD.id;
         END CASE;
     END IF;
     
@@ -743,6 +788,10 @@ BEGIN
             UPDATE comment_like
             SET status = 'ACT', updated_at = NOW()
             WHERE comment_id = OLD.id AND status = 'HID';
+        WHEN 4 THEN
+            UPDATE comment_like
+            SET is_deleted = TRUE, updated_at = NOW()
+            WHERE comment_id = OLD.id;
         
         END CASE;
     END IF;
@@ -755,35 +804,71 @@ CREATE TRIGGER post_status_update_ban_trigger
 AFTER UPDATE OF status ON post
 FOR EACH ROW
 WHEN (OLD.status IN ('PUB', 'HID', 'FLB') AND NEW.status = 'BAN')
-EXECUTE FUNCTION update_postlike_commentlike_status(1);
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(1);
 
 CREATE TRIGGER post_status_update_delete_trigger
 AFTER UPDATE OF status ON post
 FOR EACH ROW
 WHEN ((OLD.status = 'FLB' AND NEW.status = 'FLD') OR (OLD.status = 'PUB' AND NEW.status = 'RMV'))
-EXECUTE FUNCTION update_postlike_commentlike_status(2);
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(2);
 
 CREATE TRIGGER post_status_update_unban_trigger
 AFTER UPDATE OF status ON post
 FOR EACH ROW
 WHEN (OLD.status = 'BAN' AND NEW.status = 'PUB')
-EXECUTE FUNCTION update_postlike_commentlike_status(3);
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(3);
+
+CREATE TRIGGER post_status_update_hide_trigger
+AFTER UPDATE OF status ON post
+FOR EACH ROW
+WHEN (OLD.status = 'PUB' AND NEW.status = 'HID')
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(1);
+
+CREATE TRIGGER post_status_update_unhide_trigger
+AFTER UPDATE OF status ON post
+FOR EACH ROW
+WHEN (OLD.status = 'HID' AND NEW.status = 'PUB')
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(3);
+
+CREATE TRIGGER post_is_deleted_update_trigger
+AFTER UPDATE OF status ON post
+FOR EACH ROW
+WHEN (OLD.is_deleted = FALSE AND NEW.is_deleted = TRUE)
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(4);
 
 
 CREATE TRIGGER comment_status_update_ban_trigger
 AFTER UPDATE OF status ON comment
 FOR EACH ROW
 WHEN (OLD.status IN ('PUB', 'HID', 'FLB') AND NEW.status = 'BAN')
-EXECUTE FUNCTION update_postlike_commentlike_status(1);
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(1);
 
 CREATE TRIGGER comment_status_update_delete_trigger
 AFTER UPDATE OF status ON comment
 FOR EACH ROW
 WHEN ((OLD.status = 'FLB' AND NEW.status = 'FLD') OR (OLD.status = 'PUB' AND NEW.status = 'RMV'))
-EXECUTE FUNCTION update_postlike_commentlike_status(2);
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(2);
 
 CREATE TRIGGER comment_status_update_unban_trigger
 AFTER UPDATE OF status ON comment
 FOR EACH ROW
 WHEN (OLD.status = 'BAN' AND NEW.status = 'PUB')
-EXECUTE FUNCTION update_postlike_commentlike_status(3);
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(3);
+
+CREATE TRIGGER comment_status_update_hide_trigger
+AFTER UPDATE OF status ON comment
+FOR EACH ROW
+WHEN (OLD.status = 'PUB' AND NEW.status = 'HID')
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(1);
+
+CREATE TRIGGER comment_status_update_unhide_trigger
+AFTER UPDATE OF status ON comment
+FOR EACH ROW
+WHEN (OLD.status = 'HID' AND NEW.status = 'PUB')
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(3);
+
+CREATE TRIGGER post_is_deleted_update_trigger
+AFTER UPDATE OF status ON comment
+FOR EACH ROW
+WHEN (OLD.is_deleted = FALSE AND NEW.is_deleted = TRUE)
+EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(4);

@@ -1,6 +1,8 @@
 from datetime import timedelta
+from logging import Logger
 
 import requests
+
 # from pydantic import EmailStr
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import SQLAlchemyError
@@ -17,6 +19,7 @@ from app.services import auth as auth_service
 from app.services import comment as comment_service
 from app.services import post as post_service
 from app.services import user as user_service
+from app.utils import log as log_utils
 from app.utils import operation as operation_utils
 
 # reflect database schema into the MetaData object
@@ -25,6 +28,8 @@ metadata.reflect(views=True)
 
 def delete_user_after_deactivation_period_expiration():
     db: Session = next(get_db())
+    logger: Logger = log_utils.get_logger()
+
     # get all delete schedule duration expiry entries
     scheduled_delete_entries = (
         user_service.check_deactivation_expiration_for_scheduled_delete(db_session=db)
@@ -48,20 +53,22 @@ def delete_user_after_deactivation_period_expiration():
                 for user in users_to_be_deleted:
                     user.status = "DEL"
                     user.is_deleted = True
-                    # print("HI2")
 
                 db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print("SQL Error: ", exc)
+        logger.error(exc, exc_info=True)
     finally:
         db.close()
 
+    logger.info("Delete Users. Job Done")
     print("Delete Users. Job Done")
 
 
 def remove_restriction_on_user_after_duration_expiration():
     db: Session = next(get_db())
+    logger: Logger = log_utils.get_logger()
+
     remove_restrict_users_query = (
         admin_service.get_restricted_users_duration_expired_query(db_session=db)
     )
@@ -97,10 +104,22 @@ def remove_restriction_on_user_after_duration_expiration():
             # get the user ids
             remove_restrict_user_ids = [item.user_id for item in remove_restrict_users]
 
-            remove_restrict_user_ids_report_ids = list(
-                zip(remove_restrict_user_ids, remove_restrict_report_ids)
+            # get enforce_action_at
+            remove_restrict_users_enforce_action_at = [
+                item.enforce_action_at for item in remove_restrict_users
+            ]
+
+            remove_restrict_user_ids_report_ids_enforce_action_at = list(
+                zip(
+                    remove_restrict_user_ids,
+                    remove_restrict_report_ids,
+                    remove_restrict_users_enforce_action_at,
+                )
             )
 
+            send_mail = False
+            consecutive_violation = None
+            user = None
             # for every user id, check if there is any consecutive violation.
             # Since we have already updated is_active to False of the current active restrict/ban, we need to exclude that entry while getting next violation, so we use report_id in filter
             # if there is any, then enforce that violation i.e. update is_active to True, also if user current status is DAH/PDH/INA then don't update status, else update
@@ -109,7 +128,8 @@ def remove_restriction_on_user_after_duration_expiration():
             for (
                 restrict_user_id,
                 restrict_report_id,
-            ) in remove_restrict_user_ids_report_ids:
+                restrict_enforce_action_at,
+            ) in remove_restrict_user_ids_report_ids_enforce_action_at:
                 # order_by is for get the rows in a specific order,it is read only, not for updating the rows
                 # consecutive_violation_query = (
                 #     db.query(admin_model.UserRestrictBanDetail)
@@ -145,6 +165,8 @@ def remove_restriction_on_user_after_duration_expiration():
                             != restrict_report_id,  # exclude the current deactivated restrict/ban entry
                             admin_model.UserRestrictBanDetail.enforce_action_at
                             <= func.now(),
+                            admin_model.UserRestrictBanDetail.enforce_action_at
+                            > restrict_enforce_action_at,
                             admin_model.UserRestrictBanDetail.is_active == False,
                             admin_model.UserRestrictBanDetail.is_deleted == False,
                         )
@@ -187,38 +209,7 @@ def remove_restriction_on_user_after_duration_expiration():
                             consecutive_violation.status == "TBN"
                             and user.status not in user_inactive_deactivated
                         ):
-                            url = "http://127.0.0.1:8000/api/v0/users/send-ban-mail"
-                            json_data = {
-                                "status": consecutive_violation.status,
-                                "email": user.email,
-                                "username": user.username,
-                                "duration": consecutive_violation.duration,
-                                "enforced_action_at": consecutive_violation.enforce_action_at.isoformat(),
-                            }
-
-                            response = None
-                            try:
-                                # Make the POST request with JSON body parameters and a timeout
-                                response = requests.post(url, json=json_data, timeout=3)
-                                response.raise_for_status()
-                                print(
-                                    "Request sent successfully with ",
-                                    response.status_code,
-                                )
-                            except requests.Timeout:
-                                print("The request timed out")
-                                raise
-                            except requests.HTTPError as err:
-                                if response is not None:
-                                    print(
-                                        f"HTTP error occurred: {err} - Status code: {response.status_code}\nDetail: {response.content}"
-                                    )
-                                else:
-                                    print(f"HTTP error occurred: {err}")
-                                raise
-                            except requests.RequestException as exc:
-                                print(f"An error occurred: {exc}")
-                                raise
+                            send_mail = True
 
                     else:
                         if user.status not in user_inactive_deactivated:
@@ -229,20 +220,51 @@ def remove_restriction_on_user_after_duration_expiration():
                     )
 
             db.commit()
+
+            if user and consecutive_violation and send_mail:
+                url = "http://127.0.0.1:8000/api/v0/users/send-ban-mail"
+                json_data = {
+                    "status": consecutive_violation.status,
+                    "email": user.email,
+                    "username": user.username,
+                    "duration": consecutive_violation.duration,
+                    "enforced_action_at": consecutive_violation.enforce_action_at.isoformat(),
+                }
+
+                response = None
+                try:
+                    # Make the POST request with JSON body parameters and a timeout
+                    response = requests.post(url, json=json_data, timeout=3)
+                    response.raise_for_status()
+                    logger.info("Request sent to %s successfully", url)
+                except requests.Timeout as e:
+                    logger.error(e, exc_info=True)
+                    raise e
+                except requests.HTTPError as err:
+                    logger.error(err, exc_info=True)
+                    raise err
+                except requests.RequestException as exc:
+                    logger.error(exc, exc_info=True)
+                    raise exc
+
     except SQLAlchemyError as exc:
         db.rollback()
-        print("SQL Error: ", exc)
+        logger.error(exc, exc_info=True)
+    except requests.RequestException as exc:
+        db.rollback()
     except Exception as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
     finally:
         db.close()
 
+    logger.info("Restrict Users. Job Done")
     print("Restrict Users. Job Done")
 
 
 def remove_ban_on_user_after_duration_expiration():
     db: Session = next(get_db())
+    logger: Logger = log_utils.get_logger()
     remove_banned_users_query = (
         admin_service.get_temp_banned_users_duration_expired_query(db_session=db)
     )
@@ -276,16 +298,32 @@ def remove_ban_on_user_after_duration_expiration():
             # get user ids
             remove_banned_user_ids = [item.user_id for item in remove_banned_users]
 
-            remove_banned_user_ids_report_ids = list(
-                zip(remove_banned_user_ids, remove_banned_report_ids)
+            # get enforce_action_at
+            remove_banned_users_enforce_action_at = [
+                item.enforce_action_at for item in remove_banned_users
+            ]
+
+            remove_banned_user_ids_report_ids_enforce_action_at = list(
+                zip(
+                    remove_banned_user_ids,
+                    remove_banned_report_ids,
+                    remove_banned_users_enforce_action_at,
+                )
             )
 
+            send_mail = False
+            consecutive_violation = None
+            user = None
             # for every user id, check if there is any consecutive violation.
             # Since we have already updated is_active to False of the current active restrict/ban, we need to exclude that entry while getting next violation, so we use report_id in filter
             # if there is any, then enforce that violation i.e. update is_active to True, also if user current status is DAH/PDH/INA then don't update status, else update
             # if there is no consecutive violation then check current user status, if it is DAH/PDH/INA then don't update status, else update
             # there can be no consecutive violation for status already PBN
-            for banned_user_id, banned_report_id in remove_banned_user_ids_report_ids:
+            for (
+                banned_user_id,
+                banned_report_id,
+                banned_user_enforce_action_at,
+            ) in remove_banned_user_ids_report_ids_enforce_action_at:
                 # order_by is for get the rows in a specific order,it is read only, not for updating the rows
                 # consecutive_violation_query = (
                 #     db.query(admin_model.UserRestrictBanDetail)
@@ -329,6 +367,8 @@ def remove_ban_on_user_after_duration_expiration():
                             admin_model.UserRestrictBanDetail.is_deleted == False,
                             admin_model.UserRestrictBanDetail.enforce_action_at
                             <= func.now(),
+                            admin_model.UserRestrictBanDetail.enforce_action_at
+                            > banned_user_enforce_action_at,
                         )
                         .scalar()
                     )
@@ -368,38 +408,7 @@ def remove_ban_on_user_after_duration_expiration():
                             consecutive_violation.status == "TBN"
                             and user.status not in user_inactive_deactivated
                         ):
-                            url = "http://127.0.0.1:8000/api/v0/users/send-ban-mail"
-                            json_data = {
-                                "status": consecutive_violation.status,
-                                "email": user.email,
-                                "username": user.username,
-                                "duration": consecutive_violation.duration,
-                                "enforced_action_at": consecutive_violation.enforce_action_at.isoformat(),
-                            }
-
-                            response = None
-                            try:
-                                # Make the POST request with JSON body parameters and a timeout
-                                response = requests.post(url, json=json_data, timeout=3)
-                                response.raise_for_status()
-                                print(
-                                    "Request sent successfully with ",
-                                    response.status_code,
-                                )
-                            except requests.Timeout:
-                                print("The request timed out")
-                                raise
-                            except requests.HTTPError as err:
-                                if response is not None:
-                                    print(
-                                        f"HTTP error occurred: {err} - Status code: {response.status_code}\nDetail: {response.content}"
-                                    )
-                                else:
-                                    print(f"HTTP error occurred: {err}")
-                                raise
-                            except requests.RequestException as exc:
-                                print(f"An error occurred: {exc}")
-                                raise
+                            send_mail = True
                     else:
                         if user.status not in user_inactive_deactivated:
                             user.status = "ACT"  # status update
@@ -409,20 +418,54 @@ def remove_ban_on_user_after_duration_expiration():
                     )
 
             db.commit()
+
+            if user and consecutive_violation and send_mail:
+                url = "http://127.0.0.1:8000/api/v0/users/send-ban-mail"
+                json_data = {
+                    "status": consecutive_violation.status,
+                    "email": user.email,
+                    "username": user.username,
+                    "duration": consecutive_violation.duration,
+                    "enforced_action_at": consecutive_violation.enforce_action_at.isoformat(),
+                }
+
+                response = None
+                try:
+                    # Make the POST request with JSON body parameters and a timeout
+                    response = requests.post(url, json=json_data, timeout=3)
+                    response.raise_for_status()
+                    logger.info("Request sent to %s successfully", url)
+                except requests.Timeout as e:
+                    logger.error(e, exc_info=True)
+                    raise e
+                except requests.HTTPError as err:
+                    logger.error(err, exc_info=True)
+                    raise err
+                except requests.RequestException as exc:
+                    logger.error(exc, exc_info=True)
+                    raise exc
     except SQLAlchemyError as exc:
         db.rollback()
-        print("SQL Error: ", exc)
+        logger.error(exc, exc_info=True)
+    except requests.RequestException as exc:
+        db.rollback()
     except Exception as exc:
         db.rollback()
-        print("Error: ", exc)
+        logger.error(exc, exc_info=True)
     finally:
         db.close()
 
+    logger.info("Ban Users. Job Done")
     print("Ban Users. Job Done")
 
 
 def user_inactivity_delete():
     db: Session = next(get_db())
+    logger: Logger = log_utils.get_logger()
+
+    send_mail = False
+    inactive_user_emails = list()
+
     # get all users whose user auth track entries last entry has passed 6/12 months, recent ones
     inactive_auth_entries = auth_service.user_auth_track_user_inactivity_delete(
         db_session=db
@@ -476,12 +519,17 @@ def user_inactivity_delete():
             )
             for report in open_under_review_reports:
                 report.status = "CSD"
-                report.moderator_note = "UD"  # User deleted
+                report.moderator_note = "UDI"  # User deleted
 
             # change user status to PDI
             for user in inactive_auth_entries:
                 user.status = "PDI"
 
+            send_mail = True
+
+        db.commit()
+
+        if inactive_user_emails and send_mail:
             url = "http://127.0.0.1:8000/api/v0/users/send-delete-mail"
             json_data = {
                 "email": inactive_user_emails,
@@ -494,40 +542,36 @@ def user_inactivity_delete():
                 # Make the POST request with JSON body parameters and a timeout
                 response = requests.post(url, json=json_data, timeout=3)
                 response.raise_for_status()
-                print(
-                    "Request sent successfully with ",
-                    response.status_code,
-                )
-            except requests.Timeout:
-                print("The request timed out")
-                raise
+                logger.info("Request sent to %s successfully", url)
+            except requests.Timeout as e:
+                logger.error(e, exc_info=True)
+                raise e
             except requests.HTTPError as err:
-                if response is not None:
-                    print(
-                        f"HTTP error occurred: {err} - Status code: {response.status_code}\nDetail: {response.content}"
-                    )
-                else:
-                    print(f"HTTP error occurred: {err}")
-                raise
+                logger.error(err, exc_info=True)
+                raise err
             except requests.RequestException as exc:
-                print(f"An error occurred: {exc}")
-                raise
+                logger.error(exc, exc_info=True)
+                raise exc
 
-        db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print("SQL Error: ", exc)
+        logger.error(exc, exc_info=True)
+    except requests.RequestException as exc:
+        db.rollback()
     except Exception as exc:
         db.rollback()
-        print("Error: ", exc)
+        logger.error(exc, exc_info=True)
     finally:
         db.close()
 
+    logger.info("Inactive Delete Users. Job Done")
     print("Inactive Delete Users. Job Done")
 
 
 def user_inactivity_inactive():
     db: Session = next(get_db())
+    logger: Logger = log_utils.get_logger()
+
     # get all user auth track entries whose last entry has passed 3 months, recent ones
     inactive_auth_entries = auth_service.user_auth_track_user_inactivity_inactive(
         db_session=db
@@ -551,16 +595,18 @@ def user_inactivity_inactive():
 
     except SQLAlchemyError as exc:
         db.rollback()
-        print("SQL Error:", exc)
+        logger.error(exc, exc_info=True)
     finally:
         db.close()
 
+    logger.info("Inactive Users. Job Done")
     print("Inactive Users. Job Done")
 
 
 # PBN 21 day appeal limit check
 def delete_user_after_permanent_ban_appeal_limit_expiry():
     db: Session = next(get_db())
+    logger: Logger = log_utils.get_logger()
 
     # join user_restrict_ban_detail and user_content_restrict_ban_appeal_detail tables
     # to get PBN users having no pending appeals expiring 21 day appeal limit
@@ -589,6 +635,8 @@ def delete_user_after_permanent_ban_appeal_limit_expiry():
         .all()
     )
 
+    send_mail = False
+    pbn_no_appeal_user_emails = list()
     try:
         if pbn_users_with_no_pending_appeal:
             # get user ids
@@ -641,6 +689,11 @@ def delete_user_after_permanent_ban_appeal_limit_expiry():
             for user in pbn_no_appeal_users:
                 user.status = "PDB"
 
+            send_mail = True
+
+        db.commit()
+
+        if pbn_no_appeal_user_emails and send_mail:
             url = "http://127.0.0.1:8000/api/v0/users/send-delete-mail"
             json_data = {
                 "email": pbn_no_appeal_user_emails,
@@ -653,38 +706,38 @@ def delete_user_after_permanent_ban_appeal_limit_expiry():
                 # Make the POST request with JSON body parameters and a timeout
                 response = requests.post(url, json=json_data, timeout=3)
                 response.raise_for_status()
-                print(
-                    "Request sent successfully with ",
-                    response.status_code,
-                )
-            except requests.Timeout:
-                print("The request timed out")
-                raise
+                logger.info("Request sent to %s successfully", url)
+            except requests.Timeout as e:
+                logger.error(e, exc_info=True)
+                raise e
             except requests.HTTPError as err:
-                if response is not None:
-                    print(
-                        f"HTTP error occurred: {err} - Status code: {response.status_code}\nDetail: {response.content}"
-                    )
-                else:
-                    print(f"HTTP error occurred: {err}")
-                raise
+                logger.error(err, exc_info=True)
+                raise err
             except requests.RequestException as exc:
-                print(f"An error occurred: {exc}")
-                raise
+                logger.error(exc, exc_info=True)
+                raise exc
 
-        db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print("SQL Error:", exc)
+        logger.error(exc, exc_info=True)
+    except requests.RequestException as exc:
+        db.rollback()
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
     finally:
         db.close()
 
-    print("PBN 21 day Appeal Limit. Job Done")
+    logger.info(
+        "PBN %s days Appeal Limit. Job Done", settings.pbn_appeal_submit_limit_days
+    )
+    print(f"PBN {settings.pbn_appeal_submit_limit_days} days Appeal Limit. Job Done")
 
 
 # post/comment 28 day appeal limit check
 def delete_content_after_ban_appeal_limit_expiry():
     db: Session = next(get_db())
+    logger: Logger = log_utils.get_logger()
 
     # join post and appeal table to get the posts to be deleted
     posts_with_no_pending_appeal = (
@@ -778,17 +831,24 @@ def delete_content_after_ban_appeal_limit_expiry():
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print("SQL Error:", exc)
+        logger.error(exc, exc_info=True)
     finally:
         db.close()
 
-    print("Post/Comment 21 day Appeal Limit. Job Done")
+    logger.info(
+        "Post/Comment %s days Appeal Limit. Job Done",
+        settings.content_appeal_submit_limit_days,
+    )
+    print(
+        f"Post/Comment {settings.content_appeal_submit_limit_days} days Appeal Limit. Job Done",
+    )
 
 
 def close_appeal_after_duration_limit_expiration():
     # this is for PBN and post/comment ban appeals only
     # for RSP, RSF and TBN it is handled during removing restrict/ban job
     db: Session = next(get_db())
+    logger: Logger = log_utils.get_logger()
 
     try:
         # PBN
@@ -939,10 +999,11 @@ def close_appeal_after_duration_limit_expiration():
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print("SQL Error:", exc)
+        logger.error(exc, exc_info=True)
     finally:
         db.close()
 
+    logger.info("Close Appeal. Job Done")
     print("Close Appeal. Job Done")
 
 
@@ -951,6 +1012,7 @@ def reduce_violation_score_quarterly():
     # meaning there should be no violation of user in last three months for score to reduce by 50%
 
     db: Session = next(get_db())
+    logger: Logger = log_utils.get_logger()
 
     # join user_content_report_detail and user_content_restrict_ban_appeal_detail
     report_appeal_join = (
@@ -963,8 +1025,11 @@ def reduce_violation_score_quarterly():
         )
         .filter(
             admin_model.UserContentReportDetail.status == "RSD",
-            admin_model.UserContentRestrictBanAppealDetail.status.notin_(
-                ["ACP", "ACR"]
+            or_(
+                admin_model.UserContentRestrictBanAppealDetail.status.is_(None),
+                admin_model.UserContentRestrictBanAppealDetail.status.notin_(
+                    ["ACP", "ACR"]
+                ),
             ),
             func.now()
             > (
@@ -972,7 +1037,10 @@ def reduce_violation_score_quarterly():
                 + timedelta(days=settings.violation_score_reduction_days)
             ),
             admin_model.UserContentReportDetail.is_deleted == False,
-            admin_model.UserContentRestrictBanAppealDetail.is_deleted == False,
+            or_(
+                admin_model.UserContentRestrictBanAppealDetail.is_deleted.is_(None),
+                admin_model.UserContentRestrictBanAppealDetail.is_deleted == False,
+            ),
         )
         .all()
     )
@@ -986,7 +1054,11 @@ def reduce_violation_score_quarterly():
             user_id_list=no_violation_three_months_user_ids, db_session=db
         )
     )
-    guideline_violation_score_entries = guideline_violation_score_entries_query.all()
+    guideline_violation_score_entries = guideline_violation_score_entries_query.filter(
+        func.now()
+        > admin_model.GuidelineViolationScore.updated_at
+        + timedelta(days=settings.violation_score_reduction_days)
+    ).all()
     try:
         if guideline_violation_score_entries:
             reduce_rate = 0.50
@@ -1001,10 +1073,11 @@ def reduce_violation_score_quarterly():
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
-        print("SQL Error:", exc)
+        logger.error(exc, exc_info=True)
     finally:
         db.close()
 
+    logger.info("Score Reduction. Job Done")
     print("Score Reduction. Job Done")
 
 

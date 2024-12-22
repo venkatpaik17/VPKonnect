@@ -1,3 +1,6 @@
+from logging import Logger
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from pyfa_converter import FormDepends
 from sqlalchemy import func
@@ -10,11 +13,13 @@ from app.models import employee as employee_model
 from app.schemas import employee as employee_schema
 from app.services import employee as employee_service
 from app.utils import image as image_utils
+from app.utils import log as log_utils
 from app.utils import password as password_utils
 
 router = APIRouter(prefix=settings.api_prefix + "/employees", tags=["Employees"])
 
 MAX_SIZE = settings.image_max_size
+# employee_subfolder = settings.image_folder / "employee"
 
 
 @router.post(
@@ -27,6 +32,7 @@ def create_employee(
         employee_schema.EmployeeRegister
     ),  # type: ignore
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
     image: UploadFile | None = None,
 ):
     # check both entered passwords are same
@@ -68,50 +74,60 @@ def create_employee(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Supervisor not found"
             )
 
-    # create a subfolder for user specific uploads, if folder exists get it.
-    employee_subfolder = image_utils.get_or_create_entity_image_subfolder(
-        entity="employee", repr_id=str(emp_id)
-    )
-
-    # create a subfolder for profile images, if folder exists get it.
-    profile_subfolder = image_utils.get_or_create_entity_profile_image_subfolder(
-        entity_subfolder=employee_subfolder
-    )
-
     add_employee = employee_model.Employee(
         **request.dict(), emp_id=emp_id, supervisor_id=supervisor_id
     )
 
+    # create a subfolder for added employee specific uploads, if folder exists get it.
+    employee_subfolder = image_utils.get_or_create_entity_image_subfolder(
+        entity="employee", repr_id=str(emp_id), logger=logger
+    )
+
+    # create a subfolder for profile images, if folder exists get it.
+    profile_subfolder = image_utils.get_or_create_entity_profile_image_subfolder(
+        entity_subfolder=employee_subfolder, logger=logger
+    )
+
     image_path = None
-    if image:
-        # image validation and handling
-        image_name, image_path = image_utils.handle_image_operations(
-            username=emp_id, target_folder=profile_subfolder, image=image
-        )
-
-        add_employee = employee_model.Employee(
-            **request.dict(),
-            emp_id=emp_id,
-            profile_picture=image_name,
-            supervisor_id=supervisor_id,
-        )
-
     try:
+        if image:
+            # image validation and handling
+            image_name = image_utils.validate_image_generate_name(
+                username=emp_id, image=image, logger=logger
+            )
+
+            add_employee.profile_picture = image_name
+
+            image_path = profile_subfolder / image_name
+
+            # write image to target
+            image_utils.write_image(
+                image=image,
+                image_path=image_path,
+                logger=logger,
+            )
+
         db.add(add_employee)
         db.commit()
+
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
-        if image and image_path:
-            image_utils.remove_image(path=image_path)
+        logger.error(exc, exc_info=True)
+        image_utils.remove_folder(path=employee_subfolder)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error registering employee",
         ) from exc
-
-    # store image directly in the DB
-    # add_user = user_model.User(**request.dict(), profile_picture=image.file.read())
-
-    # db.refresh(add_employee)
+    except HTTPException as exc:
+        image_utils.remove_folder(path=employee_subfolder)
+        raise exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        image_utils.remove_folder(path=employee_subfolder)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
 
     return add_employee

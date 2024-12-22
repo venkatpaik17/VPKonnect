@@ -98,7 +98,7 @@ def count_comment_likes(comment_id: UUID, status: str, db_session: Session):
     return (
         db_session.query(func.count(comment_model.CommentLike.id))
         .filter(
-            comment_model.CommentLike.id == comment_id,
+            comment_model.CommentLike.comment_id == comment_id,
             comment_model.CommentLike.status == status,
             comment_model.CommentLike.is_deleted == False,
         )
@@ -112,7 +112,7 @@ def count_comment_likes_admin(
     return (
         db_session.query(func.count(comment_model.CommentLike.id))
         .filter(
-            comment_model.CommentLike.id == comment_id,
+            comment_model.CommentLike.comment_id == comment_id,
             comment_model.CommentLike.status.in_(status_in_list),
             comment_model.CommentLike.is_deleted == False,
         )

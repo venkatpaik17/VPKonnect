@@ -1,4 +1,5 @@
 from datetime import timedelta
+from logging import Logger
 
 from fastapi import APIRouter, Cookie, Depends, Form, HTTPException, status
 from fastapi.encoders import jsonable_encoder
@@ -18,6 +19,7 @@ from app.services import auth as auth_service
 from app.services import employee as employee_service
 from app.services import user as user_service
 from app.utils import auth as auth_utils
+from app.utils import log as log_utils
 from app.utils import password as password_utils
 
 router = APIRouter(tags=["Authentication"])
@@ -29,6 +31,7 @@ def user_login(
     user_credentials: OAuth2PasswordRequestForm = Depends(),
     user_device_info: str = Form(),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     # check for user in the database
     credentials = auth_schema.UserLogin(
@@ -95,7 +98,7 @@ def user_login(
         # but if there is any active retrict or ban i.e. RSP, RSF, TBN then update the status directly to restrict/ban status
         # PBN is not considered (except in case on PDH) because, even if account is deactivated or inactive, status will be changed to PBN during action enforcement (except for PDH), for rest it won't
         if user.status in ("DAH", "PDH", "INA"):
-            print(user.status)
+            # print(user.status)
             if restrict_ban_entry and restrict_ban_entry.status in (
                 "RSP",
                 "RSF",
@@ -114,10 +117,17 @@ def user_login(
 
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing login request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     # check if status is TBN or PBN
@@ -191,13 +201,19 @@ def user_login(
     except SQLAlchemyError as exc:
         # roll back and blacklist tokens
         db.rollback()
-        print(exc)
-        # auth_utils.blacklist_token(user_access_token)
         auth_utils.blacklist_token(refresh_token_unique_id)
-
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing login request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        auth_utils.blacklist_token(refresh_token_unique_id)
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return response
@@ -206,7 +222,9 @@ def user_login(
 # token rotation route for user
 @router.post(settings.api_prefix + "/users/token/refresh")
 def refresh_token_user(
-    refresh_token: str = Cookie(None), db: Session = Depends(get_db)
+    refresh_token: str = Cookie(None),
+    db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     # check for refresh token in the request
     if not refresh_token:
@@ -299,16 +317,21 @@ def refresh_token_user(
             )
 
             db.commit()
-            return response
         except HTTPException as exc:
-            print(exc)
+            logger.error(exc, exc_info=True)
             raise exc
         except SQLAlchemyError as exc:
             db.rollback()
-            print(exc)
+            logger.error(exc, exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Error processing auth",
+            ) from exc
+        except Exception as exc:
+            db.rollback()
+            logger.error(exc, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
             ) from exc
     else:
         # check refresh token status
@@ -341,7 +364,7 @@ def user_logout(
     logout_user: auth_schema.UserLogout,
     refresh_token: str = Cookie(None),
     db: Session = Depends(get_db),
-    is_func_call: bool = False,
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     refresh_token_id = None
     user = None
@@ -362,6 +385,7 @@ def user_logout(
             )
 
         user_email, refresh_token_id = get_user_claims[0], get_user_claims[1]
+        # print(refresh_token_id)
 
         # get user from db using email
         user = user_service.get_user_by_email(
@@ -401,29 +425,6 @@ def user_logout(
         )
     try:
         if logout_user.action == "one":
-            # for admin flow, fetch the refresh_token_id
-            if not refresh_token_id:
-                refresh_token_id = (
-                    auth_service.get_all_user_auth_track_entry_by_user_id_device_info(
-                        user_id=user.id,
-                        device_info=logout_user.device_info,
-                        status="ACT",
-                        db_session=db,
-                    )
-                )
-                if not refresh_token_id:
-                    if is_func_call:
-                        print("User is already logged out")
-                        return
-
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="User auth entry not found",
-                    )
-
-            # blacklist the refresh token using token id
-            auth_utils.blacklist_token(token=refresh_token_id)
-
             # fetch the active user session entry query
             user_logout_one_query = user_service.get_user_session_one_entry_query(
                 user_id=str(user.id),
@@ -433,10 +434,6 @@ def user_logout(
             )
             user_logout_one = user_logout_one_query.first()
             if not user_logout_one:
-                if is_func_call:
-                    print("Check user session for any issues")
-                    return
-
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="User Login/Session entry not found",
@@ -455,7 +452,7 @@ def user_logout(
                 )
             )
             if not user_auth_track_entries:
-                if is_func_call:
+                if logout_user.flow == "admin":
                     print("User is already logged out")
                     return
 
@@ -464,12 +461,10 @@ def user_logout(
                     detail="User auth track entries not found",
                 )
 
-            # fetch all refresh token ids and blacklist them
+            # fetch all refresh token ids to blacklist them
             all_refresh_token_ids = [
                 item.refresh_token_id for item in user_auth_track_entries
             ]
-            for token_id in all_refresh_token_ids:
-                auth_utils.blacklist_token(token=token_id)
 
             # fetch all active user session entries
             user_logout_all_query = (
@@ -479,8 +474,8 @@ def user_logout(
             )
             user_logout_all = user_logout_all_query.all()
             if not user_logout_all:
-                if is_func_call:
-                    print("Check user session for any issues")
+                if logout_user.flow == "admin":
+                    print("User is already logged out")
                     return
 
                 raise HTTPException(
@@ -494,19 +489,30 @@ def user_logout(
             )
 
         db.commit()
+
+        # token blacklisting after successful db operations
+        if logout_user.action == "one":
+            auth_utils.blacklist_token(token=refresh_token_id)
+        elif logout_user.action == "all":
+            for token_id in all_refresh_token_ids:  # type: ignore
+                auth_utils.blacklist_token(token=token_id)
+
+    except HTTPException as exc:
+        logger.error(exc, exc_info=True)
+        raise exc
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing logout request",
+            detail="Error logging out",
         ) from exc
     except Exception as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing logout request",
+            detail=str(exc),
         ) from exc
 
     response_data = {"message": f"{logout_user.username} successfully logged out"}
@@ -528,6 +534,7 @@ def employee_login(
     employee_credentials: OAuth2PasswordRequestForm = Depends(),
     employee_device_info: str = Form(),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     credentials = auth_schema.EmployeeLogin(
         username=employee_credentials.username,
@@ -618,13 +625,19 @@ def employee_login(
     except SQLAlchemyError as exc:
         # roll back and blacklist refresh token
         db.rollback()
-        print(exc)
-        # auth_utils.blacklist_token(employee_access_token)
         auth_utils.blacklist_token(token=refresh_token_unique_id)
-
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing login request",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        auth_utils.blacklist_token(refresh_token_unique_id)
+        logger.error(exc, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         ) from exc
 
     return response
@@ -633,7 +646,9 @@ def employee_login(
 # token rotation route for employee
 @router.post(settings.api_prefix + "/employees/token/refresh")
 def refresh_token_employee(
-    refresh_token: str = Cookie(None), db: Session = Depends(get_db)
+    refresh_token: str = Cookie(None),
+    db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     # check for refresh token in the request
     if not refresh_token:
@@ -724,14 +739,21 @@ def refresh_token_employee(
 
             return response
         except HTTPException as exc:
-            print(exc)
+            logger.error(exc, exc_info=True)
             raise exc
         except SQLAlchemyError as exc:
             db.rollback()
-            print(exc)
+            logger.error(exc, exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Error processing auth",
+            ) from exc
+        except Exception as exc:
+            db.rollback()
+            logger.error(exc, exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(exc),
             ) from exc
     else:
         # check refresh token status
@@ -753,6 +775,7 @@ def employee_logout(
     logout_employee: auth_schema.EmployeeLogout,
     refresh_token: str = Cookie(None),
     db: Session = Depends(get_db),
+    logger: Logger = Depends(log_utils.get_logger),
 ):
     refresh_token_id = None
     # check for refresh token cookie in the request
@@ -771,7 +794,7 @@ def employee_logout(
         )
 
     employee_email, refresh_token_id = get_employee_claims[0], get_employee_claims[1]
-    print(employee_email)
+    # print(employee_email)
     # get employee from db using email
     employee = employee_service.get_employee_by_work_email(
         work_email=employee_email,
@@ -792,9 +815,6 @@ def employee_logout(
 
     try:
         if logout_employee.action == "one":
-            # blacklist refresh token using token id
-            auth_utils.blacklist_token(token=refresh_token_id)
-
             # fetch the active user session entry query
             employee_logout_one_query = (
                 employee_service.get_employee_session_one_entry_query(
@@ -829,12 +849,10 @@ def employee_logout(
                     detail="Employee auth track entries not found",
                 )
 
-            # fetch all refresh token ids and blacklist them
+            # fetch all refresh token ids to blacklist them
             all_refresh_token_ids = [
                 item.refresh_token_id for item in employee_auth_track_entries
             ]
-            for token_id in all_refresh_token_ids:
-                auth_utils.blacklist_token(token=token_id)
 
             # fetch all active employee session entries
             employee_logout_all_query = (
@@ -854,19 +872,30 @@ def employee_logout(
             )
 
         db.commit()
+
+        # blacklist token after successful db operations
+        if logout_employee.action == "one":
+            auth_utils.blacklist_token(token=refresh_token_id)
+        elif logout_employee.action == "all":
+            for token_id in all_refresh_token_ids:  # type: ignore
+                auth_utils.blacklist_token(token=token_id)
+
+    except HTTPException as exc:
+        logger.error(exc, exc_info=True)
+        raise exc
     except SQLAlchemyError as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing logout request",
         ) from exc
     except Exception as exc:
         db.rollback()
-        print(exc)
+        logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing logout request",
+            detail=str(exc),
         ) from exc
 
     response_data = {"message": f"{logout_employee.emp_id} successfully logged out"}
