@@ -3,7 +3,6 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from pydantic import UUID4, BaseModel, EmailStr, Field, validator
 
 from app.schemas.post import PostUserFeedResponse
@@ -193,10 +192,6 @@ class UserUsernameChange(BaseModel):
         return value.lower()
 
 
-# class UserFollowersFollowing(BaseModel):
-#     fetch: str
-
-
 class UserGetFollowRequestsResponse(BaseModel):
     profile_picture: str | None
     username: str
@@ -207,10 +202,6 @@ class UserGetFollowRequestsResponse(BaseModel):
 
 class UserFollowersFollowingResponse(UserGetFollowRequestsResponse):
     follows_user: bool | None
-
-
-# class UserRemoveFollower(BaseModel):
-#     username: str
 
 
 class UserDeactivationDeletion(BaseModel):
@@ -307,21 +298,12 @@ class UserProfileResponse(UserBaseOutput):
         orm_mode = True
 
 
-# class UserPostRequest(BaseModel):
-#     post_status: Literal["PUB", "DRF", "BAN", "FLB"]
-
-
 class UserFeedResponse(BaseModel):
     posts: list[PostUserFeedResponse]
     next_cursor: UUID | None
 
     class Config:
         orm_mode = True
-
-
-# class AllUsersAdminRequest(BaseModel):
-#     status: list[str] | None = None
-#     sort: str | None = None
 
 
 class AllUsersAdminResponse(BaseModel):

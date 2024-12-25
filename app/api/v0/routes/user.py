@@ -52,6 +52,7 @@ MAX_SIZE = settings.image_max_size
 image_folder = settings.image_folder
 
 
+# create new user
 @router.post("/register", status_code=http_status.HTTP_201_CREATED)
 def create_user(
     background_tasks: BackgroundTasks,
@@ -60,7 +61,6 @@ def create_user(
     logger: Logger = Depends(log_utils.get_logger),
     image: UploadFile | None = None,
 ):
-    # print(request.account_visibility)
     # check if user registered but unverified
     unverified_user = user_service.get_user_by_email(
         email=request.email,
@@ -85,6 +85,7 @@ def create_user(
             status_code=http_status.HTTP_409_CONFLICT,
             detail=f"{unverified_user.email} is already registered. Verification Pending.",
         )
+        # redirect to verification page (front end)
 
     # check both entered passwords are same
     if request.password != request.confirm_password:
@@ -95,6 +96,7 @@ def create_user(
 
     del request.confirm_password
 
+    # check if username already exists
     username_check = user_service.check_username_exists(
         username=request.username, db_session=db
     )
@@ -110,12 +112,11 @@ def create_user(
             detail=f"{request.email} already exists in the system",
         )
 
+    # hash password
     hashed_password = password_utils.get_hash(password=request.password)
     request.password = hashed_password
 
     user_repr_id = uuid4()
-    # print(user_repr_id)
-    # print(user_subfolder)
 
     add_user = user_model.User(**request.dict(), repr_id=user_repr_id)
 
@@ -186,9 +187,6 @@ def create_user(
             detail=str(exc),
         ) from exc
 
-    # store image directly in the DB
-    # add_user = user_model.User(**request.dict(), profile_picture=image.file.read())
-
     db.refresh(add_user)
 
     # generate a token
@@ -251,6 +249,7 @@ def create_user(
     }
 
 
+# send verification mail
 @router.post("/send-verify-email")
 def send_verification_email_user(
     email_user_request: user_schema.UserSendVerifyEmail,
@@ -274,6 +273,7 @@ def send_verification_email_user(
     email_details = None
     token_id = str()
     return_message = None
+
     # check the type and accordingly set parameters
     if email_user_request.type == "USV":
         if (
@@ -379,6 +379,7 @@ def send_verification_email_user(
     return {"message": return_message}
 
 
+# verify user
 @router.post("/register/verify", response_model=user_schema.UserVerifyResponse)
 def verify_user_(
     user_verify_token: str = Form(),
@@ -451,9 +452,6 @@ def verify_user_(
             item.code_token_id for item in user_verify_token_ids_query.all()
         ]
 
-        for token_id in user_verify_token_ids:
-            auth_utils.blacklist_token(token=token_id)
-
         # update is_verified to True, status to ACT in user
         user_query.update(
             {"status": "ACT", "is_verified": True},
@@ -468,6 +466,9 @@ def verify_user_(
 
         db.commit()
         db.refresh(user)
+
+        for token_id in user_verify_token_ids:
+            auth_utils.blacklist_token(token=token_id)
 
     except SQLAlchemyError as exc:
         db.rollback()
@@ -500,6 +501,7 @@ def reset_password(
     logger: Logger = Depends(log_utils.get_logger),
 ):
     reset_user = user_schema.UserPasswordReset(email=user_email)
+
     # check if user is valid using email
     user = user_service.get_user_by_email(
         email=reset_user.email, status_not_in_list=["PDI", "PDB", "DEL"], db_session=db
@@ -714,6 +716,7 @@ def change_password_reset(
     return {"message": "Password change successful"}
 
 
+# update password
 @router.post("/password/update")
 @auth_utils.authorize(["user"])
 def change_password_update(
@@ -1084,8 +1087,6 @@ def get_user_followers_following(
     fetch: Literal["followers", "following"] = Query(),
     db: Session = Depends(get_db),
     current_user: auth_schema.AccessTokenPayload = Depends(auth_utils.get_current_user),
-    # can't use Depends(auth_utils.check_access_role(role="user")) because Depends doesn't support extra params directly
-    # hence we have a custom dependency class which will set the role param and call the get_current_user function
 ):
     # get user from username
     user = user_service.get_user_by_username(
@@ -1126,10 +1127,6 @@ def get_user_followers_following(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
-
-    # getting count of followers and following, testing
-    # print(len(curr_auth_user.followers))
-    # print(len(curr_auth_user.following))
 
     # check the fetch
     followers_list = []
@@ -1254,7 +1251,6 @@ def get_follow_requests(
         )
         .all()
     )
-    # print(requests_users)
 
     return requests_users
 
@@ -1454,6 +1450,7 @@ def user_profile(
     # posts will be fetched by all posts api endpoint
     # get no. of posts
     no_of_posts = post_service.count_posts(user_id=user.id, status="PUB", db_session=db)
+
     # get no of followers and following
     no_of_followers = user_service.count_followers(
         user_id=user.id, status="ACP", db_session=db
@@ -1475,7 +1472,7 @@ def user_profile(
         if username != curr_auth_user.username
         else None
     )
-    # print(followed_by[0].__dict__ if followed_by else "0")
+
     follows_user = True if follower_check else False
 
     user_profile_details = user_schema.UserProfileResponse(
@@ -1492,6 +1489,7 @@ def user_profile(
     return user_profile_details
 
 
+# get all user posts
 @router.get(
     "/{username}/posts",
 )
@@ -1592,6 +1590,7 @@ def get_all_user_posts(
     return all_posts_response
 
 
+# user feed
 @router.get("/feed")
 @auth_utils.authorize(["user"])
 def user_feed(
@@ -1615,8 +1614,6 @@ def user_feed(
     if not user_following_ids:
         return {"message": "Follow people to get their updates"}
 
-    # print(user_following_ids, type(user_following_ids))
-
     # get all posts upto 3 days ago
     user_feed_posts, next_cursor = post_service.get_all_posts_user_feed(
         followed_user_id_list=user_following_ids,
@@ -1625,12 +1622,8 @@ def user_feed(
         db_session=db,
     )
 
-    # print(user_feed_posts, next_cursor)
-
     if not user_feed_posts:
         return {"message": "You have completely caught up from the past 3 days"}
-
-    # print(user_feed_posts[0].post_user.__dict__)
 
     user_feed_posts_response = [
         post_schema.PostUserFeedResponse(
@@ -1703,10 +1696,6 @@ def deactivate_or_soft_delete_user(
         # check action
         if action == "deactivate":
             # update status of the user
-            # curr_auth_user_query.update(
-            #     {"status": "DAH"},
-            #     synchronize_session=False,
-            # )
             curr_auth_user.status = "DAH"
 
             message = f"Your @{curr_auth_user.username} account has been deactivated successfully"
@@ -1724,10 +1713,6 @@ def deactivate_or_soft_delete_user(
             )
 
             # update status to pending_deletion_(hide/keep)
-            # curr_auth_user_query.update(
-            #     {"status": "PDH"},
-            #     synchronize_session=False,
-            # )
             curr_auth_user.status = "PDH"
 
             message = f"Your account deletion request is accepted. @{curr_auth_user.username} account will be deleted after a deactivation period of 30 days. An email for the same has been sent to {user.email}"
@@ -1767,79 +1752,6 @@ def deactivate_or_soft_delete_user(
         ) from exc
 
     return {"message": message}
-
-
-# # deactivate the user account
-# @router.patch("/{username}/deactivate")
-# def deactivate_user(
-#     username: str,
-#     password: str = Form(),
-#     hide_interactions: bool = Form(),
-#     db: Session = Depends(get_db),
-#     current_user: auth_schema.AccessTokenPayload = Depends(
-#         auth_utils.AccessRoleDependency(role="user")
-#     ),
-# ):
-#     # check if password is entered or not
-#     if not password:
-#         raise HTTPException(
-#             status_code=http_status.HTTP_400_BAD_REQUEST, detail="Password required"
-#         )
-
-#     # create deactivation object
-#     deactivate_request = user_schema.UserDeactivation(
-#         password=password, hide_interactions=hide_interactions
-#     )
-
-#     # get user query object from username
-#     user_query = user_service.get_user_by_username_query(username, ["PBN", "DEL"], db)
-#     user = user_query.first()
-#     if not user:
-#         raise HTTPException(
-#             status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found"
-#         )
-
-#     if user.status in [
-#         "DAH",
-#         "DAK",
-#         "PDH",
-#         "PDK",
-#     ]:
-#         raise HTTPException(
-#             status_code=http_status.HTTP_404_NOT_FOUND, detail="User profile not found"
-#         )
-
-#     # check if password is right
-#     password_check = password_utils.verify_password(
-#         deactivate_request.password, user.password
-#     )
-#     if not password_check:
-#         raise HTTPException(
-#             status_code=http_status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
-#         )
-
-#     # check user identity
-#     if username != user.username:
-#         raise HTTPException(
-#             status_code=http_status.HTTP_403_FORBIDDEN,
-#             detail="Not authorized to perform requested action",
-#         )
-
-#     # update status of the user
-#     if deactivate_request.hide_interactions:
-#         user_query.update(
-#             {"status": "DAH"},
-#             synchronize_session=False,
-#         )
-#     else:
-#         user_query.update(
-#             {"status": "DAK"},
-#             synchronize_session=False,
-#         )
-
-#     db.commit()
-
-#     return {"message": "Your account has been deactivated successfully"}
 
 
 # report an item
@@ -1996,6 +1908,7 @@ def report_item(
     }
 
 
+# appeal for a content
 @router.post("/appeal")
 def appeal_content(
     appeal_user_request: user_schema.UserContentAppeal = FormDepends(
@@ -2007,7 +1920,6 @@ def appeal_content(
 ):
     restrict_ban_entry = None
     report_entry = None
-    # print(appeal_user_request.content_id)
 
     if appeal_user_request.content_type == "account":
         # get the user using username and email
@@ -2274,7 +2186,7 @@ def appeal_content(
     }
 
 
-# for internal jobs involving bans only
+# for internal jobs involving bans only, send ban email
 @router.post("/send-ban-mail")
 def send_ban_mail(
     email_parameters: admin_schema.UserSendBanEmail,
@@ -2314,6 +2226,7 @@ def send_ban_mail(
         raise exc
 
 
+# for internal jobs involving delete only, send delete email
 @router.post("/send-delete-mail")
 def send_delete_mail(
     email_request: admin_schema.UserSendDeleteEmail,
@@ -2344,6 +2257,7 @@ def send_delete_mail(
         raise exc
 
 
+# user violation status
 @router.get("/violation")
 @auth_utils.authorize(["user"])
 def get_user_violation_status_details(
@@ -2390,6 +2304,7 @@ def get_user_violation_status_details(
     return {f"{curr_auth_user.username} violation details": violation_details_response}
 
 
+# about user
 @router.get("/{username}/about")
 @auth_utils.authorize(["user"])
 def about_user(

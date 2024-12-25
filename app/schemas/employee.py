@@ -2,7 +2,6 @@ import re
 from datetime import date, datetime
 from typing import Literal
 
-from fastapi import HTTPException, status
 from pydantic import BaseModel, EmailStr, Field, validator
 
 from app.utils.exception import CustomValidationError
@@ -135,13 +134,6 @@ class EmployeeOutput(BaseModel):
     emp_id: str
     first_name: str
     last_name: str
-
-
-# class AllEmployeesAdminRequest(BaseModel):
-#     status: list[str] | None = None
-#     type: list[str] | None = None
-#     designation: list[str] | None = None
-#     sort: str | None = None
 
 
 class SupervisorOutput(BaseModel):

@@ -1,7 +1,6 @@
-from calendar import month
 from datetime import timedelta
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.config.app import settings

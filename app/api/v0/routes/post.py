@@ -27,6 +27,7 @@ router = APIRouter(prefix=settings.api_prefix + "/posts", tags=["Posts"])
 image_folder = settings.image_folder
 
 
+# create post
 @router.post(
     "/",
     status_code=status.HTTP_201_CREATED,
@@ -91,7 +92,8 @@ def create_post(
     except SQLAlchemyError as exc:
         db.rollback()
         logger.error(exc, exc_info=True)
-        image_utils.remove_image(path=image_path)
+        if image_path:
+            image_utils.remove_image(path=image_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating post",
@@ -101,7 +103,8 @@ def create_post(
     except Exception as exc:
         db.rollback()
         logger.error(exc, exc_info=True)
-        image_utils.remove_image(path=image_path)
+        if image_path:
+            image_utils.remove_image(path=image_path)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
@@ -136,6 +139,7 @@ def create_post(
     return {"message": message, "post": new_post_response}
 
 
+# get a post
 @router.get("/{post_id}")
 @auth_utils.authorize(["user"])
 def get_post(
@@ -171,9 +175,8 @@ def get_post(
         return HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Post owner not found"
         )
-    # print(post_user.status)
-    # print(post.status)
-    # print(post.id)
+
+    # redirect to user profile if user is deactivated or deleted
     if post_user.status in ("DAH", "PDH", "PBN", "PDB", "PDI", "DEL"):
         return RedirectResponse(
             settings.api_prefix + "/users/" + str(post_user.username) + "/profile",
@@ -188,6 +191,7 @@ def get_post(
     flagged = False
     tag = None
     if post_user.username != curr_auth_user.username:
+        # if post user is private and curr user is not a follower then redirect to user profile
         if post_user.account_visibility == "PRV" and not follower_check:
             return RedirectResponse(
                 settings.api_prefix + "/users/" + str(post_user.username) + "/profile",
@@ -238,6 +242,7 @@ def get_post(
     return post_response
 
 
+# edit post
 # published post -> edit; caption only
 # draft post -> publish, edit; image and caption
 @router.put("/{post_id}")
@@ -431,6 +436,7 @@ def edit_post(
     return {"message": message, "post": edit_post_response}
 
 
+# remove post
 @router.delete("/{post_id}")
 @auth_utils.authorize(["user"])
 def remove_post(
@@ -470,7 +476,7 @@ def remove_post(
                 detail="Cannot delete post, user is under full restriction",
             )
 
-    # check if current user is permitted to edit the post
+    # check if current user is permitted to delete the post
     if post.user_id != curr_auth_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -505,6 +511,7 @@ def remove_post(
     }
 
 
+# like unlike post
 @router.post("/{post_id}/like")
 @auth_utils.authorize(["user"])
 def like_unlike_post(
@@ -580,11 +587,6 @@ def like_unlike_post(
 
             # update the like
             post_like.status = "RMV"
-            # print(post_like_query)
-            # post_like_query.update(
-            #     {"status": "RMV"},
-            #     synchronize_session=False,
-            # )
 
         db.commit()
     except SQLAlchemyError as exc:
@@ -608,6 +610,7 @@ def like_unlike_post(
     return {"message": f"Post has been {action}d successfully"}
 
 
+# get users who liked the post
 @router.get(
     "/{post_id}/like",
     response_model=dict[str, list[post_schema.LikeUserResponse] | UUID | str],
@@ -658,9 +661,6 @@ def get_post_like_users(
             return {"message": "No more users who liked available", "info": "Done"}
 
         return {"message": "No users liked yet"}
-
-    # print(like_users[0])
-    # print(next_cursor)
 
     # like users response
     like_users_response = [
@@ -770,6 +770,7 @@ def create_comment(
     }
 
 
+# get post comments
 @router.get(
     "/{post_id}/comments",
     response_model=dict[str, list[comment_schema.CommentResponse] | UUID | str],

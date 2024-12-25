@@ -1,26 +1,22 @@
 from datetime import datetime, timedelta
 from uuid import UUID
 
-import requests
 from fastapi import HTTPException, status
 from sqlalchemy import func
-
-# from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config.app import settings
-from app.db.session import get_db
 from app.models import admin as admin_model
 from app.services import admin as admin_service
 from app.services import comment as comment_service
 from app.services import post as post_service
 from app.services import user as user_service
-from app.utils import log as log_utils
 
 
 def consecutive_violation_operations(
     consecutive_violation: admin_model.UserRestrictBanDetail, db: Session
 ):
+    # get consecutive violation report
     consecutive_violation_report_query = admin_service.get_a_report_by_report_id_query(
         report_id=str(consecutive_violation.report_id),
         status="FRS",
@@ -135,7 +131,6 @@ def consecutive_violation_operations(
         valid_flagged_content_ids = [content[0] for content in valid_flagged_content]
         # we flag only posts for report type account, so content is basically post, valid_flagged_content_ids is a list of post ids
         for content_id in valid_flagged_content_ids:
-            # print(content_id)
             post = post_service.get_a_post(
                 post_id=str(content_id),
                 status_not_in_list=["PUB", "DRF", "HID", "RMV"],
@@ -208,6 +203,7 @@ def user_restrict_ban_detail_user_operation(
     restrict_status: str,
     db: Session,
 ):
+    # get the active restrict/ban entry
     current_entry = admin_service.get_user_active_restrict_ban_entry_user_id_report_id(
         user_id=str(user_id),
         status=restrict_status,
@@ -288,26 +284,6 @@ def user_restrict_ban_detail_user_operation(
                 consecutive_violation.status == "TBN"
                 and user.status not in user_inactive_deactivated
             ):
-                # # generate appeal link
-                # appeal_link = "https://vpkonnect.in/accounts/appeals/form_ban"
-
-                # email_subject = "VPKonnect - Account Ban"
-                # email_details = admin_schema.SendEmail(
-                #     template=(
-                #         "permanent_ban_email.html"
-                #         if consecutive_violation.status == "PBN"
-                #         else "temporary_ban_email.html"
-                #     ),
-                #     email=[EmailStr(user.email)],
-                #     body_info={
-                #         "username": user.username,
-                #         "link": appeal_link,
-                #         "days": consecutive_violation.duration // 24,
-                #         "ban_enforced_datetime": consecutive_violation.enforce_action_at.strftime(
-                #             "%b %d, %Y %H:%M %Z"
-                #         ),
-                #     },
-                # )
                 send_mail = True
         else:
             if user.status not in user_inactive_deactivated:
@@ -756,6 +732,7 @@ def operations_after_appeal_reject(
 
                     # revoke the ban
                     ban_entry.is_active = False
+
         elif restrict_ban_content_type in ("post", "comment"):
             if restrict_ban_content_type == "post":
                 appeal_reject_post = post_service.get_a_post(

@@ -2,14 +2,11 @@ from datetime import date, datetime, timedelta
 from logging import Logger
 from math import floor
 from pathlib import Path
-from sys import exc_info
 from typing import Literal
 from uuid import UUID
 
-import requests
-from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi import status as http_status
-from fastapi.responses import JSONResponse
 from fastapi_mail.errors import ConnectionErrors
 from pydantic import EmailStr
 from sqlalchemy import func
@@ -139,6 +136,7 @@ def get_reports_admin_dashboard(
     except HTTPException as exc:
         raise exc
 
+    # get moderator if emp_id
     moderator = None
     if emp_id:
         moderator = employee_service.get_employee_by_emp_id(
@@ -223,32 +221,6 @@ def get_requested_report(
             )
 
         flagged_banned_posts_ids = [post[0] for post in flagged_banned_posts]
-
-    # get the required objects (User, Post, Comment) and other parameters
-    # prepare the response object
-    # report_response = admin_schema.ReportResponse(
-    #     reporter_user=requested_report.reporter_user.__dict__,
-    #     reported_user=requested_report.reported_user.__dict__,
-    #     reported_item_type=requested_report.reported_item_type,
-    #     reported_item=(
-    #         (requested_report.post.__dict__ if requested_report.post else None)
-    #         or (requested_report.comment.__dict__ if requested_report.comment else None)
-    #         or requested_report.account.__dict__
-    #     ),
-    #     case_number=requested_report.case_number,
-    #     report_reason=map_utils.report_reasons_code_dict.get(requested_report.report_reason),  # type: ignore
-    #     report_reason_user=(
-    #         requested_report.report_reason_user.__dict__
-    #         if requested_report.report_reason_user
-    #         else None
-    #     ),
-    #     status=requested_report.status,
-    #     moderator_note=requested_report.moderator_note,
-    #     moderator=(
-    #         requested_report.moderator.__dict__ if requested_report.moderator else None
-    #     ),
-    #     reported_at=requested_report.created_at,
-    # )
 
     # we create the dict and then parse it using overriding parse_obj function on ReportResponse schema
     requested_report_data = {
@@ -822,14 +794,10 @@ def enforce_report_action_auto(
             detail="Reported user is permanently banned",
         )
 
+    # set flag for user deactivation/inactive status
     user_deactivated_inactive = False
     if reported_user.status in ("DAH", "PDH", "INA"):
         user_deactivated_inactive = True
-
-        # raise HTTPException(
-        #     status_code=status.HTTP_404_NOT_FOUND,
-        #     detail="User profile not found",
-        # )
 
     # if there are any OPN related report(s) which were not noticed before, put it/them under review and consider it/them in this action request
     # get open related reports
@@ -920,10 +888,12 @@ def enforce_report_action_auto(
     no_action = False
     violation_status = ""
     violation_duration = 0
-    # if the score has not changed, then no action/duration, especially for minimal
+
+    # if the score has not changed, then no action/duration, especially for minimal scores
     if curr_final_violation_score == new_final_violation_score:
         no_action = True
     else:
+        # get action and duration
         action_duration = tuple(
             map_utils.get_action_duration_final_violation_score(
                 new_final_violation_score
@@ -956,7 +926,7 @@ def enforce_report_action_auto(
     # For action, update user_restrict_ban_detail, user_content_report_detail
     # If active action then update user_content_report_event_timeline using trigger, guideline_violation_score, guideline_violation_last_added_score and user tables
     # so updating user_content_report_detail, user_content_report_event_timeline using trigger and guideline_violation_score tables are common operations for both
-    # also another common operation is to handle other under review reports if any, related to this content report, they need to be closed.
+    # also another common operation is to handle other under review reports if any, related to this content report.
     message = ""
     new_user_restrict_ban = None
     is_active = None
@@ -1030,7 +1000,7 @@ def enforce_report_action_auto(
 
     # add restrict ban entry if present
     # common operations for both action and no action
-    # user status update if action
+    # user status update if active action
     # send mail
     try:
         if new_user_restrict_ban:
@@ -1123,7 +1093,7 @@ def enforce_report_action_auto(
                     related_report.moderator_note = "RF"
 
         send_mail = False
-        # user status to be updated at the end if any action
+        # user status to be updated at the end if any active action
         if not no_action and new_user_restrict_ban:
             # update user status in user table only if action is enforced now i.e is_active = True and (user is not deactivated/inactive or (user is deactivated/inactive and action is PBN and status is not PDH), else don't update
             if new_user_restrict_ban.is_active and (
@@ -1326,10 +1296,6 @@ def enforce_report_action_manual(
     user_deactivated_inactive = False
     if reported_user.status in ("DAH", "PDH", "INA"):
         user_deactivated_inactive = True
-        # raise HTTPException(
-        #     status_code=status.HTTP_404_NOT_FOUND,
-        #     detail="User profile not found",
-        # )
 
     # if there are any OPN related report(s) which were not noticed before, put it/them under review and consider it/them in this action request
     # get open related reports
@@ -1405,9 +1371,6 @@ def enforce_report_action_manual(
     else:
         score_type = "post_score"
         curr_score = user_guideline_violation_score.post_score
-
-    # print(curr_final_violation_score)
-    # print(min_req_violation_score)
 
     # get all restrict/ban entries for a user
     user_all_restrict_ban_query = admin_service.get_all_user_restrict_ban_query(
@@ -1504,7 +1467,7 @@ def enforce_report_action_manual(
     )
 
     # update user_restrict_ban_detail, user_content_report_detail, user_content_report_event_timeline using trigger, guideline_violation_score and user tables
-    # handle other under review reports if any, related to this content report, they need to be closed
+    # handle other under review reports if any, related to this content report
     # ban/flag the content
     try:
         # add restrict/ban entry
@@ -1542,6 +1505,7 @@ def enforce_report_action_manual(
 
             number_of_posts_not_found = len(flagged_posts_not_found)
             number_of_flagged_posts_request = len(action_request.contents_to_be_banned)
+
             # if all the flagegd posts are not found then we need to raise the exception for moderator to look up account again
             if number_of_posts_not_found == number_of_flagged_posts_request:
                 raise HTTPException(
@@ -1623,7 +1587,6 @@ def enforce_report_action_manual(
                 )
             )
 
-            # flag content
             # flag content only if reported_item_type is post/comment
             if report.reported_item_type in ["post", "comment"]:
                 content_to_be_flagged_ban = post_query or comment_query  # type: ignore
@@ -1632,6 +1595,7 @@ def enforce_report_action_manual(
                     synchronize_session=False,
                 )
 
+        # handled seperately
         # get related under review reports
         related_reports_query = (
             admin_service.get_related_reports_for_specific_report_query(
@@ -1645,7 +1609,6 @@ def enforce_report_action_manual(
             )
         )
 
-        # handled seperately
         related_reports = related_reports_query.all()
         if related_reports:
             # check if other related reports have same report reason, if yes, resolve those, else close
@@ -1671,9 +1634,6 @@ def enforce_report_action_manual(
                 and reported_user.status != "PDH"
             )
         ):
-            # reported_user_query.update(
-            #     {"status": action_duration[0]}, synchronize_session=False
-            # )
             reported_user.status = action_request.action
 
         db.commit()
@@ -1827,6 +1787,7 @@ def get_appeals_admin_dashboard(
     return all_appeals_response
 
 
+# appeal dashboard
 @router.get(
     "/appeals/dashboard",
     response_model=list[admin_schema.AllAppealResponse],
@@ -1884,6 +1845,7 @@ def get_appeals_dashboard(
     return all_appeals_response
 
 
+# get appeal
 @router.get("/appeals/{case_number}")
 @auth_utils.authorize(["content_admin", "content_mgmt"])
 def get_requested_appeal(
@@ -1916,7 +1878,7 @@ def get_requested_appeal(
             detail="Not authorized to access requested resource",
         )
 
-    # we create the dict and then parse it using overriding parse_obj function on AppealResponse schema
+    # we create the dict and then parse it by overriding parse_obj function on AppealResponse schema
     requested_appeal_data = {
         "case_number": requested_appeal.case_number,
         "appeal_user": requested_appeal.appeal_user.__dict__,
@@ -1941,6 +1903,7 @@ def get_requested_appeal(
     return admin_schema.AppealResponse.parse_obj(requested_appeal_data)
 
 
+# get related open appeals for a specific appeal
 @router.get(
     "/appeals/{case_number}/related",
     response_model=list[admin_schema.AllAppealResponse],
@@ -1977,6 +1940,7 @@ def get_all_related_open_appeals_for_specific_appeal(
 
     else:
         moderator_id = curr_employee.id
+
         # get the appeal using case_number (OPN or URV, sometimes we may need to check OPN appeals for a URV appeal too)
         specific_appeal = admin_service.get_an_appeal(case_number, ["OPN", "URV"], db)
         if not specific_appeal:
@@ -2198,6 +2162,7 @@ def selected_appeals_assign_update(
     }
 
 
+# appeal policy check
 @router.patch("/appeals/{case_number}/check-policy")
 @auth_utils.authorize(["content_admin", "content_mgmt"])
 def check_appeal_policy(
@@ -2377,6 +2342,7 @@ def check_appeal_policy(
     return {"message": message, "detail": detail}
 
 
+# appeal close
 @router.patch("/appeals/{case_number}/close")
 @auth_utils.authorize(["content_admin", "content_mgmt"])
 def close_appeal(
@@ -2503,7 +2469,7 @@ def close_appeal(
     }
 
 
-# api endpoint for appeal accept
+# appeal accept
 @router.post("/appeals/action")
 @auth_utils.authorize(["content_admin", "content_mgmt"])
 def appeal_action(
@@ -2582,8 +2548,7 @@ def appeal_action(
     # get report entry
     # get restrict_ban entry associated with the appeal
     # if report entry is absent then it is error
-    # for post/comment appeal and post/comment report and restrict ban entry is absent then it is only for unban post/comment
-    #   everything with respect to restrict_ban is None
+    # for post/comment appeal and post/comment report, if restrict ban entry is absent then it is only for post/comment unban (everything with respect to restrict_ban is None)
     report_entry = admin_service.get_a_report_by_report_id_query(
         report_id=appeal_entry.report_id, status="RSD", db_session=db
     ).first()
@@ -2596,6 +2561,8 @@ def appeal_action(
     restrict_ban_entry = admin_service.get_user_active_restrict_ban_entry_report_id(
         report_id=appeal_entry.report_id, db_session=db
     )
+
+    # if report type is account or appeal type is account and no restrict/ban entry then it is error
     if (
         report_entry.reported_item_type in ("post", "comment")
         and appeal_entry.content_type in ("post", "comment")
@@ -2625,7 +2592,7 @@ def appeal_action(
             appeal_entry.status = "ACP"
             appeal_entry.moderator_note = action_request.moderator_note
 
-            # add the appeal accept operations function here
+            # appeal accept opeartion
             consecutive_violation, send_mail = (
                 operation_utils.operations_after_appeal_accept(
                     user_id=appeal_entry.user_id,
@@ -2648,7 +2615,7 @@ def appeal_action(
                 )
             )
 
-            # add related appeals logic
+            # related appeals
             related_appeals = related_appeals_query.filter(
                 admin_model.UserContentRestrictBanAppealDetail.is_policy_followed
                 == True
@@ -2662,7 +2629,7 @@ def appeal_action(
             appeal_entry.status = "REJ"
             appeal_entry.moderator_note = action_request.moderator_note
 
-            # add the appeal reject operations function here
+            # appeal reject operation
             operation_utils.operations_after_appeal_reject(
                 user_id=appeal_entry.user_id,
                 report_id=appeal_entry.report_id,
@@ -2683,7 +2650,7 @@ def appeal_action(
                 db=db,
             )
 
-            # add related appeals logic
+            # related appeals
             related_appeals = related_appeals_query.filter(
                 admin_model.UserContentRestrictBanAppealDetail.is_policy_followed
                 is not None
@@ -2757,6 +2724,7 @@ def appeal_action(
     }
 
 
+# get users admin
 @router.get(
     "/users", response_model=dict[str, list[user_schema.AllUsersAdminResponse] | str]
 )
@@ -2800,7 +2768,7 @@ def get_users(
     return {"users": all_users}
 
 
-# get user
+# get a user admin
 @router.get("/users/{username}")
 @auth_utils.authorize(["content_mgmt", "content_admin"])
 def user_profile_details(
@@ -2824,6 +2792,7 @@ def user_profile_details(
     no_of_posts = post_service.count_posts_admin(
         user_id=user.id, status=None, db_session=db
     )
+
     # get no of followers and following
     no_of_followers = user_service.count_followers(
         user_id=user.id, status="ACP", db_session=db
@@ -2860,6 +2829,7 @@ def user_profile_details(
     return user_details
 
 
+# get user posts admin
 @router.get("/users/{username}/posts")
 @auth_utils.authorize(["content_mgmt", "content_admin"])
 def get_all_user_posts(
@@ -2933,6 +2903,7 @@ def get_all_user_posts(
     return all_posts_response
 
 
+# get all employees
 @router.get("/employees")
 @auth_utils.authorize(["management", "hr"])
 def get_employees(
@@ -2977,7 +2948,6 @@ def get_employees(
     if not all_employees:
         return {"message": "No employees yet"}
 
-    # print(all_employees[0].supervisor)
     all_employees_response = [
         employee_schema.AllEmployeesAdminResponse(
             emp_id=employee.emp_id,
@@ -3013,6 +2983,7 @@ def get_employees(
     return {"employees": all_employees_response}
 
 
+# get a post admin
 @router.get("/posts/{post_id}")
 @auth_utils.authorize(["content_admin", "content_mgmt"])
 def get_post(
@@ -3065,6 +3036,7 @@ def get_post(
     return post_response
 
 
+# get a post comment admin
 @router.get("/comments/{comment_id}")
 @auth_utils.authorize(["content_admin", "content_mgmt"])
 def get_comment(
@@ -3113,6 +3085,7 @@ def get_comment(
     return comment_response
 
 
+# app metrics dashboard
 @router.get("/app-metrics")
 @auth_utils.authorize(["management", "software_dev", "content_admin"])
 def app_activity_metrics(

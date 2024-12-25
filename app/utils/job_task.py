@@ -9,7 +9,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config.app import settings
-from app.db.db_sqlalchemy import metadata
 from app.db.session import get_db
 from app.models import admin as admin_model
 from app.models import comment as comment_model
@@ -22,9 +21,6 @@ from app.services import user as user_service
 from app.utils import log as log_utils
 from app.utils import operation as operation_utils
 
-# reflect database schema into the MetaData object
-metadata.reflect(views=True)
-
 
 def delete_user_after_deactivation_period_expiration():
     db: Session = next(get_db())
@@ -34,14 +30,14 @@ def delete_user_after_deactivation_period_expiration():
     scheduled_delete_entries = (
         user_service.check_deactivation_expiration_for_scheduled_delete(db_session=db)
     )
-    # print(scheduled_delete_entries[0].__dict__ if scheduled_delete_entries else None)
+
     try:
         if scheduled_delete_entries:
             # fetch user ids
             scheduled_delete_user_ids = [
                 user.user_id for user in scheduled_delete_entries
             ]
-            # print(scheduled_delete_user_ids)
+
             # get the users
             users_to_be_deleted = user_service.get_all_users_by_id(
                 user_id_list=scheduled_delete_user_ids,
@@ -49,7 +45,6 @@ def delete_user_after_deactivation_period_expiration():
                 db_session=db,
             )
             if users_to_be_deleted:
-                # print(users_to_be_deleted[0].__dict__)
                 for user in users_to_be_deleted:
                     user.status = "DEL"
                     user.is_deleted = True
@@ -73,7 +68,7 @@ def remove_restriction_on_user_after_duration_expiration():
         admin_service.get_restricted_users_duration_expired_query(db_session=db)
     )
     remove_restrict_users = remove_restrict_users_query.all()
-    # print(remove_restrict_users)
+
     try:
         if remove_restrict_users:
             # update is_active to False to all expired restrictions
@@ -122,27 +117,15 @@ def remove_restriction_on_user_after_duration_expiration():
             user = None
             # for every user id, check if there is any consecutive violation.
             # Since we have already updated is_active to False of the current active restrict/ban, we need to exclude that entry while getting next violation, so we use report_id in filter
-            # if there is any, then enforce that violation i.e. update is_active to True, also if user current status is DAH/PDH/INA then don't update status, else update
-            # if there is no consecutive violation then check current user status, if it is DAH/PDH/INA then don't update status, else update
+            # if there is any, then enforce that violation i.e. update is_active to True, also if user current status is DAH/PDH/INA then update only if violation is PBN(except for PDH) else don't update status
+            # if there is no consecutive violation then check current user status, if it is DAH/PDH/INA then update only if violation is PBN(except for PDH) else don't update status
             # there can be no consecutive violation for status already PBN
+            # we use enforce_action_at to make sure we get the next consecutive violation from the current one, not the previous violations
             for (
                 restrict_user_id,
                 restrict_report_id,
                 restrict_enforce_action_at,
             ) in remove_restrict_user_ids_report_ids_enforce_action_at:
-                # order_by is for get the rows in a specific order,it is read only, not for updating the rows
-                # consecutive_violation_query = (
-                #     db.query(admin_model.UserRestrictBanDetail)
-                #     .filter(
-                #         admin_model.UserRestrictBanDetail.user_id == restrict_user_id,
-                #         admin_model.UserRestrictBanDetail.enforce_action_at
-                #         < func.now(),
-                #         admin_model.UserRestrictBanDetail.is_active == False,
-                #         admin_model.UserRestrictBanDetail.is_deleted == False,
-                #     )
-                #     .order_by(admin_model.UserRestrictBanDetail.enforce_action_at.asc())
-                # )
-
                 # get user, its status should be RSP/RSF or DAH/INA/PDH
                 user = user_service.get_user_by_id(
                     user_id=str(restrict_user_id),
@@ -173,7 +156,6 @@ def remove_restriction_on_user_after_duration_expiration():
                         .scalar()
                     )
 
-                    # print(subq_min_enforce_action_at)
                     consecutive_violation_query = db.query(
                         admin_model.UserRestrictBanDetail
                     ).filter(
@@ -316,27 +298,15 @@ def remove_ban_on_user_after_duration_expiration():
             user = None
             # for every user id, check if there is any consecutive violation.
             # Since we have already updated is_active to False of the current active restrict/ban, we need to exclude that entry while getting next violation, so we use report_id in filter
-            # if there is any, then enforce that violation i.e. update is_active to True, also if user current status is DAH/PDH/INA then don't update status, else update
-            # if there is no consecutive violation then check current user status, if it is DAH/PDH/INA then don't update status, else update
+            # if there is any, then enforce that violation i.e. update is_active to True, also if user current status is DAH/PDH/INA then only update if violation is PBN(except for PDH) else don't update status
+            # if there is no consecutive violation then check current user status, if it is DAH/PDH/INA then only update if violation is PBN(except for PDH) else don't update
             # there can be no consecutive violation for status already PBN
+            # we use enforce_action_at to make sure we get the next consecutive violation from the current one, not the previous violations
             for (
                 banned_user_id,
                 banned_report_id,
                 banned_user_enforce_action_at,
             ) in remove_banned_user_ids_report_ids_enforce_action_at:
-                # order_by is for get the rows in a specific order,it is read only, not for updating the rows
-                # consecutive_violation_query = (
-                #     db.query(admin_model.UserRestrictBanDetail)
-                #     .filter(
-                #         admin_model.UserRestrictBanDetail.user_id == banned_user_id,
-                #         admin_model.UserRestrictBanDetail.enforce_action_at
-                #         > func.now(),
-                #         admin_model.UserRestrictBanDetail.is_active == False,
-                #         admin_model.UserRestrictBanDetail.is_deleted == False,
-                #     )
-                #     .order_by(admin_model.UserRestrictBanDetail.enforce_action_at.asc())
-                # )
-
                 # get user
                 user = user_service.get_user_by_id(
                     user_id=banned_user_id,
@@ -493,21 +463,6 @@ def user_inactivity_delete():
 
             # get user emails
             inactive_user_emails = [user.email for user in inactive_auth_entries]
-
-            # # generate request data link
-            # request_data_link = "https://vpkonnect.in/accounts/data_request_form"
-            # email_subject = "VPKonnect - Account Deletion Due to User Inactivity"
-            # email_details = admin_schema.SendEmail(
-            #     template="inactivity_delete_email.html",
-            #     email=inactive_user_emails,
-            #     body_info={
-            #         "link": request_data_link,
-            #     },
-            # )
-            # try:
-            #     email_utils.send_email(email_subject, email_details, background_tasks)
-            # except Exception as exc:
-            #     print("Email error: ", exc)
 
             # get all open/under review reports and close them
             open_under_review_reports = (
@@ -669,21 +624,6 @@ def delete_user_after_permanent_ban_appeal_limit_expiry():
 
             # get user emails
             pbn_no_appeal_user_emails = [user.email for user in pbn_no_appeal_users]
-
-            # # generate request data link
-            # request_data_link = "https://vpkonnect.in/accounts/data_request_form"
-            # email_subject = "VPKonnect - Account Deletion Due to Appeal Limit Expiration"
-            # email_details = admin_schema.SendEmail(
-            #     template="appeal_limit_account_delete.html",
-            #     email=pbn_no_appeal_user_emails,
-            #     body_info={
-            #         "link": request_data_link,
-            #     },
-            # )
-            # try:
-            #     email_utils.send_email(email_subject, email_details, background_tasks)
-            # except Exception as exc:
-            #     print("Email error: ", exc)
 
             # update user status to PDB
             for user in pbn_no_appeal_users:
@@ -1054,11 +994,14 @@ def reduce_violation_score_quarterly():
             user_id_list=no_violation_three_months_user_ids, db_session=db
         )
     )
+
+    # we need to check the updated_at as to make sure it is updated every 91 days only, not everytime when job runs
     guideline_violation_score_entries = guideline_violation_score_entries_query.filter(
         func.now()
         > admin_model.GuidelineViolationScore.updated_at
         + timedelta(days=settings.violation_score_reduction_days)
     ).all()
+
     try:
         if guideline_violation_score_entries:
             reduce_rate = 0.50
@@ -1079,283 +1022,3 @@ def reduce_violation_score_quarterly():
 
     logger.info("Score Reduction. Job Done")
     print("Score Reduction. Job Done")
-
-
-# def operations_after_appeal_accept():
-#     # Access the reflected view
-#     join_view = metadata.tables["appeal_restrict_join_view"]
-#     db = next(get_db())
-
-#     try:
-#         # query the view
-#         appeal_restrict_join_entries = db.query(join_view).all()
-#         print(len(appeal_restrict_join_entries))
-#         print("Hello1")
-#         error_appeal_ids = []
-#         for restrict_ban_appeal_entry in appeal_restrict_join_entries:
-#             try:
-#                 query_user_id = restrict_ban_appeal_entry.user_id
-#                 query_report_id = restrict_ban_appeal_entry.report_id
-#                 query_content_id = None
-#                 query_content_type = None
-#                 query_status = None
-
-#                 if restrict_ban_appeal_entry.appeal_content_type == "account":
-#                     print("Account")
-#                     # Appeal type: account, Report type: account
-#                     if (
-#                         restrict_ban_appeal_entry.user_restrict_ban_content_type
-#                         == "account"
-#                     ):
-#                         print("Account-Account")
-#                         # fetch the flagged posts from account_report_flagged_content, get all or partial no of posts which are banned, change the status from BAN to PUB
-#                         # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
-#                         # revoke the active restrict/ban, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status
-#                         account_report_valid_flagged_content = admin_service.get_all_valid_flagged_content_account_report_id(
-#                             report_id=query_report_id, db_session=db
-#                         )
-#                         account_report_flagged_content_ids = [
-#                             content[0]
-#                             for content in account_report_valid_flagged_content
-#                         ]
-#                         no_of_flagged_posts = len(account_report_flagged_content_ids)
-
-#                         account_report_flagged_posts = (
-#                             post_service.get_all_posts_by_id_query(
-#                                 post_id_list=account_report_flagged_content_ids,
-#                                 status_in_list=["BAN"],
-#                                 db_session=db,
-#                             ).all()
-#                         )
-#                         no_of_banned_posts = len(account_report_flagged_posts)
-
-#                         for post in account_report_flagged_posts:
-#                             post.status = "PUB"
-
-#                         query_content_type = (
-#                             restrict_ban_appeal_entry.user_restrict_ban_content_type
-#                         )
-#                         operation_utils.guideline_violation_score_last_added_score_operation(
-#                             user_id=query_user_id,
-#                             report_id=query_report_id,
-#                             ban_content_type=query_content_type,
-#                             db=db,
-#                             account_report_flagged_content=no_of_flagged_posts,
-#                             content_to_be_unbanned=no_of_banned_posts,
-#                             content_already_unbanned=(
-#                                 no_of_flagged_posts - no_of_banned_posts
-#                             ),
-#                         )
-
-#                         query_status = (
-#                             restrict_ban_appeal_entry.user_restrict_ban_status
-#                         )
-#                         operation_utils.user_restrict_ban_detail_user_operation(
-#                             user_id=query_user_id,
-#                             report_id=query_report_id,
-#                             status=query_status,
-#                             db=db,
-#                         )
-
-#                     # Appeal type: account, Report type: post/comment
-#                     elif restrict_ban_appeal_entry.user_restrict_ban_content_type in (
-#                         "post",
-#                         "comment",
-#                     ):
-#                         # fetch the banned post/comment and change the status to PUB
-#                         # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
-#                         # revoke the active restrict/ban, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status
-#                         query_content_id = (
-#                             restrict_ban_appeal_entry.user_restrict_ban_content_id
-#                         )
-#                         query_content_type = (
-#                             restrict_ban_appeal_entry.user_restrict_ban_content_type
-#                         )
-#                         operation_utils.post_comment_operation(
-#                             ban_content_id=query_content_id,
-#                             ban_content_type=query_content_type,
-#                             db=db,
-#                         )
-
-#                         operation_utils.guideline_violation_score_last_added_score_operation(
-#                             user_id=query_user_id,
-#                             report_id=query_report_id,
-#                             ban_content_type=query_content_type,
-#                             db=db,
-#                             content_to_be_unbanned=1,
-#                             content_already_unbanned=0,
-#                         )
-
-#                         query_status = (
-#                             restrict_ban_appeal_entry.user_restrict_ban_status
-#                         )
-#                         operation_utils.user_restrict_ban_detail_user_operation(
-#                             user_id=query_user_id,
-#                             report_id=query_report_id,
-#                             status=query_status,
-#                             db=db,
-#                         )
-
-#                 elif restrict_ban_appeal_entry.appeal_content_type in (
-#                     "post",
-#                     "comment",
-#                 ):
-#                     if (
-#                         restrict_ban_appeal_entry.appeal_content_type == "post"
-#                         and restrict_ban_appeal_entry.user_restrict_ban_content_type
-#                         == "account"
-#                         and restrict_ban_appeal_entry.user_restrict_ban_status
-#                         in ("RSP", "RSF")
-#                     ):
-#                         # fetch the flagged posts from account_report_flagged_content
-#                         # fetch the appealed post, change the status to PUB
-#                         # If all posts have their bans revoked then consider last added score and manage it, update is_removed to True
-#                         #     Else consider only fraction of last added score
-#                         # update guideline violation score table
-
-#                         account_report_valid_flagged_content = admin_service.get_all_valid_flagged_content_account_report_id(
-#                             report_id=query_report_id, db_session=db
-#                         )
-#                         account_report_flagged_content_ids = [
-#                             content[0]
-#                             for content in account_report_valid_flagged_content
-#                         ]
-#                         no_of_flagged_posts = len(account_report_flagged_content_ids)
-
-#                         account_report_flagged_posts = (
-#                             post_service.get_all_posts_by_id_query(
-#                                 post_id_list=account_report_flagged_content_ids,
-#                                 status_in_list=["PUB"],
-#                                 db_session=db,
-#                             ).all()
-#                         )
-#                         no_of_posts_already_unbanned = len(account_report_flagged_posts)
-
-#                         query_content_id = restrict_ban_appeal_entry.appeal_content_id
-#                         operation_utils.post_comment_operation(
-#                             ban_content_id=query_content_id,
-#                             ban_content_type=restrict_ban_appeal_entry.appeal_content_type,
-#                             db=db,
-#                         )
-
-#                         query_content_type = (
-#                             restrict_ban_appeal_entry.user_restrict_ban_content_type
-#                         )
-#                         operation_utils.guideline_violation_score_last_added_score_operation(
-#                             user_id=query_user_id,
-#                             report_id=query_report_id,
-#                             ban_content_type=query_content_type,
-#                             db=db,
-#                             content_to_be_unbanned=1,
-#                             content_already_unbanned=no_of_posts_already_unbanned,
-#                             account_report_flagged_content=no_of_flagged_posts,
-#                         )
-
-#                         # Appeal type: post, Report type: account, (RSP/RSF, active restrict)
-#                         if (
-#                             restrict_ban_appeal_entry.user_restrict_ban_is_active
-#                             == "True"
-#                         ):
-#                             # check if all the flagged posts have PUB status, if yes then revoke the restrict, else don't
-#                             # if restrict is revoked, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status
-#                             if (
-#                                 no_of_posts_already_unbanned + 1
-#                             ) == no_of_flagged_posts:
-#                                 query_status = (
-#                                     restrict_ban_appeal_entry.user_restrict_ban_status
-#                                 )
-#                                 operation_utils.user_restrict_ban_detail_user_operation(
-#                                     user_id=query_user_id,
-#                                     report_id=query_report_id,
-#                                     status=query_status,
-#                                     db=db,
-#                                 )
-
-#                         # Appeal type: post, Report type: account (RSP/RSF, no active restrict)
-#                         else:
-#                             # all required operations are done before
-#                             pass
-
-#                     elif restrict_ban_appeal_entry.user_restrict_ban_content_type in (
-#                         "post",
-#                         "comment",
-#                     ):
-#                         # fetch the banned post/comment, update status to PUB
-#                         query_content_id = (
-#                             restrict_ban_appeal_entry.user_restrict_ban_content_id
-#                         )
-#                         query_content_type = (
-#                             restrict_ban_appeal_entry.user_restrict_ban_content_type
-#                         )
-#                         operation_utils.post_comment_operation(
-#                             ban_content_id=query_content_id,
-#                             ban_content_type=query_content_type,
-#                             db=db,
-#                         )
-
-#                         # Appeal type: post/comment, Report type: post/comment (active restrict/ban)
-#                         if (
-#                             restrict_ban_appeal_entry.user_restrict_ban_is_active
-#                             == "True"
-#                         ):
-#                             # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
-#                             # revoke the active restrict/ban, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status
-
-#                             operation_utils.guideline_violation_score_last_added_score_operation(
-#                                 user_id=query_user_id,
-#                                 report_id=query_report_id,
-#                                 ban_content_type=query_content_type,
-#                                 db=db,
-#                                 content_to_be_unbanned=1,
-#                                 content_already_unbanned=0,
-#                             )
-
-#                             query_status = (
-#                                 restrict_ban_appeal_entry.user_restrict_ban_status
-#                             )
-#                             operation_utils.user_restrict_ban_detail_user_operation(
-#                                 user_id=query_user_id,
-#                                 report_id=query_report_id,
-#                                 status=query_status,
-#                                 db=db,
-#                             )
-
-#                         # Appeal type: post/comment, Report type: post/comment (active restrict/ban concluded)
-#                         elif (
-#                             restrict_ban_appeal_entry.user_restrict_ban_is_active
-#                             == "False"
-#                         ):
-#                             # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
-#                             operation_utils.guideline_violation_score_last_added_score_operation(
-#                                 user_id=query_user_id,
-#                                 report_id=query_report_id,
-#                                 ban_content_type=query_content_type,
-#                                 db=db,
-#                                 content_to_be_unbanned=1,
-#                                 content_already_unbanned=0,
-#                             )
-
-#                         # Appeal type: post/comment, Report type: post/comment (no restrict/ban entry)
-#                         elif (
-#                             restrict_ban_appeal_entry.user_restrict_ban_is_active
-#                             is None
-#                         ):
-#                             # required operation(s) are done before
-#                             pass
-
-#                 db.commit()
-#             except SQLAlchemyError as exc:
-#                 print("SQL Error:", exc)
-#                 db.rollback()
-#             except Exception as exc:
-#                 print("Error", exc)
-#                 db.rollback()
-
-#             #
-#     except Exception as exc:
-#         print("Error", exc)
-#         db.rollback()
-#     finally:
-#         db.close()
-
-#     print("Appeal accept operations. Job Done.")

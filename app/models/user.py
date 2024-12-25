@@ -5,7 +5,6 @@ from sqlalchemy import (
     Date,
     ForeignKey,
     Integer,
-    LargeBinary,
     String,
     UniqueConstraint,
     and_,
@@ -70,9 +69,6 @@ class User(Base):
     date_of_birth = Column(Date, nullable=False)
     age = Column(Integer, nullable=False)
 
-    # length param is just a hint for db schema, not a enforced restriction, 3MiB is limit
-    # profile_picture = Column(LargeBinary(length=3145728), nullable=True)
-
     # storing only filename
     profile_picture = Column(String(), nullable=True)
     gender = Column(String(length=1), nullable=False)
@@ -123,26 +119,6 @@ class User(Base):
     passwords = relationship("PasswordChangeHistory", back_populates="password_user")
     sessions = relationship("UserSession", back_populates="session_user")
     posts = relationship("Post", back_populates="post_user")
-    # published_posts = relationship(
-    #     "Post",
-    #     primaryjoin="and_(User.id == Post.user_id, Post.status == 'ACP')",
-    #     back_populates="published_post_user",
-    # )
-    # draft_posts = relationship(
-    #     "Post",
-    #     primaryjoin="and_(User.id == Post.user_id, Post.status == 'DRF')",
-    #     back_populates="draft_post_user",
-    # )
-    # banned_posts = relationship(
-    #     "Post",
-    #     primaryjoin="and_(User.id == Post.user_id, and_(Post.status == 'BAN', Post.is_ban_final == False)",
-    #     back_populates="banned_post_user",
-    # )
-    # flagged_to_be_banned_posts = relationship(
-    #     "Post",
-    #     primaryjoin="and_(User.id == Post.user_id, Post.status == 'FLB')",
-    #     back_populates="flagged_post_user",
-    # )
     post_likes = relationship("PostLike", back_populates="post_like_user")
     comments = relationship("Comment", back_populates="comment_user")
     comment_likes = relationship("CommentLike", back_populates="comment_like_user")
@@ -211,7 +187,6 @@ class UserAccountHistory(Base):
     event_type = Column(String(), nullable=False)
     new_detail_value = Column(String(), nullable=True)
     previous_detail_value = Column(String(), nullable=True)
-    # device_info = Column(String(), nullable=False)
     user_id = Column(
         UUID(as_uuid=True), ForeignKey("user.id", ondelete="CASCADE"), nullable=False
     )

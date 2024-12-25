@@ -281,16 +281,6 @@ def check_deactivation_expiration_for_scheduled_delete(db_session: Session):
     )
 
 
-# # get users whose community guidelines violation period is over and specific action needs to be taken
-# def check_violation_period_expiration_query(
-#     status_list: list[str], time_period: int, db_session: Session
-# ):
-#     return db_session.query(user_model.User).filter(
-#         user_model.User.status.in_(status_list),
-#         func.now() > user_model.User.updated_at + timedelta(hours=time_period),
-#     )
-
-
 # get report entry from usercontentreportdetail table
 def check_if_same_report_exists(
     user_id: str, content_id: str, report_reason: str, db_session: Session

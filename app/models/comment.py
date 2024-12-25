@@ -1,11 +1,8 @@
 from sqlalchemy import (
     TIMESTAMP,
-    BigInteger,
     Boolean,
     Column,
-    Enum,
     ForeignKey,
-    Integer,
     String,
     UniqueConstraint,
     func,
@@ -50,7 +47,6 @@ class Comment(Base):
         overlaps="published_comment_post",
     )
     likes = relationship("CommentLike", back_populates="like_comment")
-    # activity = relationship("CommentActivity", back_populates="activity_comment")
 
 
 # orm model for comment liske table
@@ -90,16 +86,3 @@ class CommentLike(Base):
     like_comment = relationship(
         "Comment", back_populates="likes", foreign_keys=[comment_id]
     )
-
-
-# # orm model for comment activity table.
-# class CommentActivity(Base):
-#     __tablename__ = "comment_activity"
-#     id = Column(
-#         UUID(as_uuid=True), primary_key=True, server_default=func.generate_ulid()
-#     )
-#     total_likes = Column(BigInteger, nullable=False, server_default=text("0"))
-#     comment_id = Column(
-#         UUID(as_uuid=True), ForeignKey("comment.id", ondelete="CASCADE"), nullable=False
-#     )
-#     activity_comment = relationship("Comment", back_populates="activity")

@@ -25,7 +25,7 @@ from app.utils import password as password_utils
 router = APIRouter(tags=["Authentication"])
 
 
-# login route
+# user login
 @router.post(settings.api_prefix + "/users/login")
 def user_login(
     user_credentials: OAuth2PasswordRequestForm = Depends(),
@@ -33,7 +33,7 @@ def user_login(
     db: Session = Depends(get_db),
     logger: Logger = Depends(log_utils.get_logger),
 ):
-    # check for user in the database
+    # check for user
     credentials = auth_schema.UserLogin(
         username=user_credentials.username,
         password=user_credentials.password,
@@ -93,92 +93,55 @@ def user_login(
         user_id=str(user.id), db_session=db
     )
 
+    refresh_token_unique_id = str()
     try:
         # if account is deactivated then it should be activated by updating status to active
         # but if there is any active retrict or ban i.e. RSP, RSF, TBN then update the status directly to restrict/ban status
         # PBN is not considered (except in case on PDH) because, even if account is deactivated or inactive, status will be changed to PBN during action enforcement (except for PDH), for rest it won't
         if user.status in ("DAH", "PDH", "INA"):
-            # print(user.status)
             if restrict_ban_entry and restrict_ban_entry.status in (
                 "RSP",
                 "RSF",
                 "TBN",
                 "PBN",
             ):
-                # user_query.update(
-                #     {"status": restrict_ban_entry.status}, synchronize_session=False
-                # )
                 user.status = restrict_ban_entry.status
             else:
-                user_query.update({"status": "ACT"}, synchronize_session=False)
+                user.status = "ACT"
 
-        db.commit()
-        # print(user.status)
+        # check if status is TBN or PBN
+        if user.status == "TBN" and (
+            restrict_ban_entry and restrict_ban_entry.status == "TBN"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Your account has been disabled from {restrict_ban_entry.enforce_action_at} to {restrict_ban_entry.enforce_action_at + timedelta(hours=restrict_ban_entry.duration)}. Please contact support for assistance and submit an appeal if our action is unjustified.",
+            )
 
-    except SQLAlchemyError as exc:
-        db.rollback()
-        logger.error(exc, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error processing login request",
-        ) from exc
-    except Exception as exc:
-        db.rollback()
-        logger.error(exc, exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
-        ) from exc
+        if user.status == "PBN" and (
+            restrict_ban_entry and restrict_ban_entry.status == "PBN"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Your account has been banned permanently from {restrict_ban_entry.enforce_action_at}. Please contact support for assistance and submit an appeal if you think our action is not justified.",
+            )
 
-    # check if status is TBN or PBN
-    if user.status == "TBN" and (
-        restrict_ban_entry and restrict_ban_entry.status == "TBN"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Your account has been disabled from {restrict_ban_entry.enforce_action_at} to {restrict_ban_entry.enforce_action_at + timedelta(hours=restrict_ban_entry.duration)}. Please contact support for assistance and submit an appeal if our action is unjustified.",
+        # set the claims for token generation
+        access_token_claims = {"sub": user.email, "role": user.type}
+        refresh_token_claims = {
+            "sub": user.email,
+            "role": user.type,
+            "device_info": user_device_info,
+        }
+
+        # create the tokens
+        user_access_token = auth_utils.create_access_token(claims=access_token_claims)
+        user_refresh_token, refresh_token_unique_id = auth_utils.create_refresh_token(
+            claims=refresh_token_claims
         )
 
-    if user.status == "PBN" and (
-        restrict_ban_entry and restrict_ban_entry.status == "PBN"
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Your account has been banned permanently from {restrict_ban_entry.enforce_action_at}. Please contact support for assistance and submit an appeal if you think our action is not justified.",
-        )
-
-    # set the claims for token generation
-    access_token_claims = {"sub": user.email, "role": user.type}
-    refresh_token_claims = {
-        "sub": user.email,
-        "role": user.type,
-        "device_info": user_device_info,
-    }
-
-    # create the tokens
-    user_access_token = auth_utils.create_access_token(claims=access_token_claims)
-    user_refresh_token, refresh_token_unique_id = auth_utils.create_refresh_token(
-        claims=refresh_token_claims
-    )
-
-    # set the response data
-    token_data = auth_schema.AccessToken(
-        access_token=user_access_token, token_type="bearer"
-    )
-
-    # encode to JSON, set refresh token cookie
-    response = JSONResponse(content=jsonable_encoder(token_data))
-    response.set_cookie(
-        key="refresh_token",
-        value=user_refresh_token,
-        httponly=True,
-        secure=True,
-    )
-    # print(user_device_info)
-
-    # check if there is any previous active session for the user with same device info, if yes then invalidate it (is_active to False)
-    # add new login session to user session table and add an entry to user auth track to track the refresh token wrt to user and device
-    try:
+        # check if there is any previous active session for the user with same device info, if yes then invalidate it (is_active to False)
+        # add new login session to user session table and add an entry to user auth track to track the refresh token wrt to user and device
         previous_active_user_session = user_service.get_user_session_one_entry_query(
             user_id=user.id, device_info=user_device_info, is_active=True, db_session=db
         ).first()
@@ -193,33 +156,51 @@ def user_login(
             device_info=user_device_info,
             user_id=user.id,
         )
+
         db.add(add_user_session)
         db.add(add_user_auth_track)
 
         db.commit()
 
     except SQLAlchemyError as exc:
-        # roll back and blacklist tokens
         db.rollback()
-        auth_utils.blacklist_token(refresh_token_unique_id)
+        if refresh_token_unique_id:
+            auth_utils.blacklist_token(refresh_token_unique_id)
         logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing login request",
         ) from exc
+    except HTTPException as exc:
+        raise exc
     except Exception as exc:
         db.rollback()
-        auth_utils.blacklist_token(refresh_token_unique_id)
+        if refresh_token_unique_id:
+            auth_utils.blacklist_token(refresh_token_unique_id)
         logger.error(exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
 
+    # set the response data
+    token_data = auth_schema.AccessToken(
+        access_token=user_access_token, token_type="bearer"
+    )
+
+    # encode to JSON, set refresh token cookie
+    response = JSONResponse(content=jsonable_encoder(token_data))
+    response.set_cookie(
+        key="refresh_token",
+        value=user_refresh_token,
+        httponly=True,
+        secure=True,
+    )
+
     return response
 
 
-# token rotation route for user
+# token rotation for user
 @router.post(settings.api_prefix + "/users/token/refresh")
 def refresh_token_user(
     refresh_token: str = Cookie(None),
@@ -236,7 +217,6 @@ def refresh_token_user(
     token_claims, token_verify = auth_utils.verify_refresh_token(
         refresh_token=refresh_token
     )
-    # print(token_verify)
 
     # check token blacklist using jti
     refresh_token_blacklist_check = auth_utils.is_token_blacklisted(
@@ -261,6 +241,7 @@ def refresh_token_user(
         access_token=new_user_access_token, token_type="bearer"
     )
     response = JSONResponse(content=jsonable_encoder(access_token_data))
+
     # if refresh token is expired, generate new refresh token and set as a httponly secure cookie, add new refresh token entry to user_auth_track
     # update expired token status
     if not token_verify:
@@ -274,6 +255,7 @@ def refresh_token_user(
             httponly=True,
             secure=True,
         )
+
         try:
             user = user_service.get_user_by_email(
                 email=str(token_claims.email),
@@ -344,7 +326,6 @@ def refresh_token_user(
                 detail="Access Denied, Token invalid/revoked",
             )
 
-        # print("Response object:", response.__dict__)
     return response
 
 
@@ -358,7 +339,7 @@ def dummy_user(
     return {"message": f"checking token rotation {user.email}"}
 
 
-# logout route
+# user logout
 @router.post(settings.api_prefix + "/users/logout")
 def user_logout(
     logout_user: auth_schema.UserLogout,
@@ -385,7 +366,6 @@ def user_logout(
             )
 
         user_email, refresh_token_id = get_user_claims[0], get_user_claims[1]
-        # print(refresh_token_id)
 
         # get user from db using email
         user = user_service.get_user_by_email(
@@ -423,6 +403,8 @@ def user_logout(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid flow value for logout",
         )
+
+    all_refresh_token_ids = []
     try:
         if logout_user.action == "one":
             # fetch the active user session entry query
@@ -491,10 +473,10 @@ def user_logout(
         db.commit()
 
         # token blacklisting after successful db operations
-        if logout_user.action == "one":
+        if logout_user.action == "one" and refresh_token_id:
             auth_utils.blacklist_token(token=refresh_token_id)
         elif logout_user.action == "all":
-            for token_id in all_refresh_token_ids:  # type: ignore
+            for token_id in all_refresh_token_ids:
                 auth_utils.blacklist_token(token=token_id)
 
     except HTTPException as exc:
@@ -528,7 +510,7 @@ def user_logout(
     return response
 
 
-# employees APIs
+# employee login
 @router.post(settings.api_prefix + "/employees/login")
 def employee_login(
     employee_credentials: OAuth2PasswordRequestForm = Depends(),
@@ -593,20 +575,6 @@ def employee_login(
         claims=refresh_token_claims
     )
 
-    # set the response data
-    token_data = auth_schema.AccessToken(
-        access_token=employee_access_token, token_type="bearer"
-    )
-
-    # encode to JSON, set refresh token cookie
-    response = JSONResponse(content=jsonable_encoder(token_data))
-    response.set_cookie(
-        key="refresh_token",
-        value=employee_refresh_token,
-        httponly=True,
-        secure=True,
-    )
-
     # add login session to employee session table and add an entry to employee auth track to track the refresh token wrt to employee and device
     try:
         add_employee_session = employee_model.EmployeeSession(
@@ -640,10 +608,24 @@ def employee_login(
             detail=str(exc),
         ) from exc
 
+    # set the response data
+    token_data = auth_schema.AccessToken(
+        access_token=employee_access_token, token_type="bearer"
+    )
+
+    # encode to JSON, set refresh token cookie
+    response = JSONResponse(content=jsonable_encoder(token_data))
+    response.set_cookie(
+        key="refresh_token",
+        value=employee_refresh_token,
+        httponly=True,
+        secure=True,
+    )
+
     return response
 
 
-# token rotation route for employee
+# token rotation for employee
 @router.post(settings.api_prefix + "/employees/token/refresh")
 def refresh_token_employee(
     refresh_token: str = Cookie(None),
@@ -660,7 +642,6 @@ def refresh_token_employee(
     token_claims, token_verify = auth_utils.verify_refresh_token(
         refresh_token=refresh_token
     )
-    # print(token_verify)
 
     # check token blacklist using jti
     refresh_token_blacklist_check = auth_utils.is_token_blacklisted(
@@ -769,7 +750,7 @@ def refresh_token_employee(
     return response
 
 
-# logout route, Header() fetches "Authorization" parameter
+# employee logout
 @router.post(settings.api_prefix + "/employees/logout")
 def employee_logout(
     logout_employee: auth_schema.EmployeeLogout,
@@ -778,6 +759,7 @@ def employee_logout(
     logger: Logger = Depends(log_utils.get_logger),
 ):
     refresh_token_id = None
+
     # check for refresh token cookie in the request
     if not refresh_token:
         raise HTTPException(
@@ -794,7 +776,7 @@ def employee_logout(
         )
 
     employee_email, refresh_token_id = get_employee_claims[0], get_employee_claims[1]
-    # print(employee_email)
+
     # get employee from db using email
     employee = employee_service.get_employee_by_work_email(
         work_email=employee_email,
@@ -813,6 +795,7 @@ def employee_logout(
             detail="Not authorized to perform requested action",
         )
 
+    all_refresh_token_ids = []
     try:
         if logout_employee.action == "one":
             # fetch the active user session entry query
@@ -877,7 +860,7 @@ def employee_logout(
         if logout_employee.action == "one":
             auth_utils.blacklist_token(token=refresh_token_id)
         elif logout_employee.action == "all":
-            for token_id in all_refresh_token_ids:  # type: ignore
+            for token_id in all_refresh_token_ids:
                 auth_utils.blacklist_token(token=token_id)
 
     except HTTPException as exc:

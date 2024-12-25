@@ -312,6 +312,10 @@ BEGIN
             action_info := ' System error';
         ELSIF NEW.moderator_note = 'UD' THEN
             action_info := ' user deleted';
+        ELSIF NEW.moderator_note = 'UDB' THEN
+            action_info := ' - Banned user deleted';
+        ELSIF NEW.moderator_note = 'UDI' THEN
+            action_info := ' - Inactive user deleted';
         END IF;
         
         info := report_content_type || action_info;

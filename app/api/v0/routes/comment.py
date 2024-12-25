@@ -2,24 +2,20 @@ from logging import Logger
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, status
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config.app import settings
 from app.db.session import get_db
 from app.models import comment as comment_model
-from app.models import post as post_model
 from app.schemas import auth as auth_schema
 from app.schemas import comment as comment_schema
-from app.schemas import post as post_schema
 from app.services import comment as comment_service
 from app.services import post as post_service
 from app.services import user as user_service
 from app.utils import auth as auth_utils
 from app.utils import basic as basic_utils
-from app.utils import image as image_utils
 from app.utils import log as log_utils
 
 router = APIRouter(prefix=settings.api_prefix + "/comments", tags=["Comments"])
@@ -27,6 +23,7 @@ router = APIRouter(prefix=settings.api_prefix + "/comments", tags=["Comments"])
 image_folder = settings.image_folder
 
 
+# edit comment
 @router.put("/{comment_id}")
 @auth_utils.authorize(["user"])
 def edit_comment(
@@ -79,12 +76,12 @@ def edit_comment(
             detail="Cannot edit flagged to be banned comments",
         )
 
-    # update the comment
-    comment.content = content
-    comment.user_id = comment.user_id
-    comment.post_id = comment.post_id
-
     try:
+        # update the comment
+        comment.content = content
+        comment.user_id = comment.user_id
+        comment.post_id = comment.post_id
+
         db.commit()
 
     except SQLAlchemyError as exc:
@@ -117,6 +114,7 @@ def edit_comment(
     }
 
 
+# remove comment
 @router.delete("/{comment_id}")
 @auth_utils.authorize(["user"])
 def remove_comment(
@@ -176,12 +174,12 @@ def remove_comment(
                 detail="Cannot delete comment.  is under full restriction",
             )
 
-    # old post status
+    # old comment status
     old_comment_status = comment.status
 
     try:
-        # delete the post
-        post.status = "FLD" if old_comment_status == "FLB" else "RMV"
+        # delete the comment
+        comment.status = "FLD" if old_comment_status == "FLB" else "RMV"
 
         db.commit()
     except SQLAlchemyError as exc:
@@ -204,6 +202,7 @@ def remove_comment(
     }
 
 
+# like a comment
 @router.post("/{comment_id}/like")
 @auth_utils.authorize(["user"])
 def like_unlike_comment(
@@ -253,6 +252,7 @@ def like_unlike_comment(
         comment_like = comment_service.user_like_exists(
             user_id=curr_auth_user.id, comment_id=comment.id, db_session=db
         )
+
         # like a post, create a new entry
         if action == "like":
             if comment_like:
@@ -298,6 +298,7 @@ def like_unlike_comment(
     return {"message": f"Comment has been {action}d successfully"}
 
 
+# get users who liked the comment
 @router.get(
     "/{comment_id}/like",
     response_model=dict[str, list[comment_schema.LikeUserResponse] | UUID | str],
@@ -348,9 +349,6 @@ def get_comment_like_users(
             return {"message": "No more users who liked available", "info": "Done"}
 
         return {"message": "No users liked yet"}
-
-    # print(like_users[0])
-    # print(next_cursor)
 
     # like users response
     like_users_response = [

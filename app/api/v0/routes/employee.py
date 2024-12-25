@@ -1,5 +1,4 @@
 from logging import Logger
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from pyfa_converter import FormDepends
@@ -19,7 +18,6 @@ from app.utils import password as password_utils
 router = APIRouter(prefix=settings.api_prefix + "/employees", tags=["Employees"])
 
 MAX_SIZE = settings.image_max_size
-# employee_subfolder = settings.image_folder / "employee"
 
 
 @router.post(

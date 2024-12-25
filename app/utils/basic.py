@@ -4,6 +4,7 @@ from datetime import datetime
 import ulid
 
 
+# function to get time ago for content
 def time_ago(post_datetime: datetime):
     current_datetime = datetime.now().astimezone()
     difference = current_datetime - post_datetime
@@ -31,6 +32,7 @@ def image_to_base64(image_path):
         return base64.b64encode(image_file.read()).decode("utf-8")
 
 
+# adjust violation scores for manual report action
 def adjust_violation_scores(
     curr_final_violation_score: int,
     min_req_violation_score: int,

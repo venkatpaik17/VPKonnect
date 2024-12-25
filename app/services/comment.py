@@ -1,4 +1,3 @@
-from collections import defaultdict
 from uuid import UUID
 
 from sqlalchemy import exists, func, select

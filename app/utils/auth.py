@@ -6,7 +6,7 @@ from uuid import uuid4
 from cachetools import TTLCache, keys
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from fastapi.security.oauth2 import OAuth2PasswordBearer
-from jose import ExpiredSignatureError, JWTError, jwt
+from jose import JWTError, jwt
 
 from app.config.app import settings
 from app.schemas import auth as auth_schema
@@ -28,15 +28,18 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="(users, employees)/login")
 token_blacklist_cache = TTLCache(maxsize=settings.ttlcache_max_size, ttl=24 * 60 * 60)
 
 
+# uuid
 def get_uuid():
     return str(uuid4())
 
 
+# check if token blacklisted or not
 def is_token_blacklisted(token: str):
     cache_key = keys.hashkey(token)
     return cache_key in token_blacklist_cache
 
 
+# blacklist the token
 def blacklist_token(token: str):
     cache_key = keys.hashkey(token)
     token_blacklist_cache[cache_key] = None
@@ -225,17 +228,13 @@ def verify_access_token(access_token: str):
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
         # if token is expired
-        # except ExpiredSignatureError as exc:
-        #     raise HTTPException(
-        #         status_code=status.HTTP_401_UNAUTHORIZED,
-        #         detail="Token expired",
-        #         headers={"WWW-Authenticate": "Bearer"},
-        #     ) from exc
         if token_exp < datetime.now().timestamp():
             raise TokenExpiredSignatureError(
                 status_code=401, detail=f"{user_type} Token expired"
             )
+
     # other errors
     except JWTError as exc:
         raise HTTPException(
@@ -243,6 +242,7 @@ def verify_access_token(access_token: str):
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+
     # set the token data and return it
     token_data = auth_schema.AccessTokenPayload(email=user_email, type=user_type)
     return token_data
@@ -257,6 +257,7 @@ def verify_refresh_token(refresh_token: str):
             algorithms=[ALGORITHM],
             options={"verify_exp": False},
         )
+
         # get all claims
         token_id = claims.get("jti")
         user_email = claims.get("sub")
@@ -276,6 +277,7 @@ def verify_refresh_token(refresh_token: str):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
             )
+
         # set the token data
         token_data = auth_schema.RefreshTokenPayload(
             email=user_email,
@@ -284,12 +286,11 @@ def verify_refresh_token(refresh_token: str):
             token_id=token_id,
         )
 
-        # print(token_exp)
-        # print(datetime.now().timestamp())
         # check the exp, epoch comparision. token_exp is epoch timezone specific. So we use now() for current time
         if token_exp < datetime.now().timestamp():
             # return the token data with false flag
             return (token_data, False)
+
     # other errors
     except JWTError as exc:
         raise HTTPException(
@@ -346,8 +347,7 @@ class AccessRoleDependency:
                 detail="Invalid user payload",
             )
         type_desgn = current_user.type
-        # print(type_desgn)
-        # print(self.role)
+
         for user_role in self.role:
             try:
                 if type_desgn in map_utils.transform_access_role(value=user_role):
@@ -362,33 +362,6 @@ class AccessRoleDependency:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access requested resource",
         )
-
-
-# def get_current_admin(access_token: str = Depends(oauth2_scheme)):
-#     access_token_data = get_current_user(access_token)
-#     if access_token_data.type != "ADM":
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Could not validate credentials",
-#             headers={"WWW-Authenticate": "Bearer"},
-#         )
-
-#     return access_token_data
-
-
-# # check the role to grant access
-# can't use this because it is not possible to send params through Depends
-# def check_access_role(
-#     role: str, current_user: auth_schema.AccessTokenPayload = Depends(get_current_user)
-# ):
-#     type_desgn = current_user.type
-#     if type_desgn not in access_roles[role]:
-#         raise HTTPException(
-#             status_code=status.HTTP_403_FORBIDDEN,
-#             detail="Not authorized to perform requested action",
-#         )
-
-#     return current_user
 
 
 # role based authorization using decorator and wrapper

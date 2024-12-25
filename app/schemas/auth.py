@@ -35,10 +35,16 @@ class UserLogout(BaseModel):
     @validator("action")
     def check_action_flow(cls, val, values):
         flow_val = values["flow"]
+        device_info_val = values["device_info"]
         if flow_val == "admin" and val == "one":
             raise CustomValidationError(
                 status_code=400,
                 detail="Admin flow cannot have action as 'one'",
+            )
+        if val == "one" and device_info_val is None:
+            raise CustomValidationError(
+                status_code=400,
+                detail="Device info cannot be None for action as 'one'",
             )
 
         return val

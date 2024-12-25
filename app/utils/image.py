@@ -12,13 +12,7 @@ image_folder = Path("images")
 MAX_SIZE = settings.image_max_size
 
 
-# def get_or_create_user_image_subfolder(username: str):
-#     user_subfolder = image_folder / username
-#     user_subfolder.mkdir(parents=True, exist_ok=True)
-
-#     return user_subfolder
-
-
+# user subfolder
 def get_or_create_entity_image_subfolder(entity: str, repr_id: str, logger: Logger):
     entity_subfolder = image_folder / entity / repr_id
 
@@ -40,6 +34,7 @@ def get_or_create_entity_image_subfolder(entity: str, repr_id: str, logger: Logg
     return entity_subfolder
 
 
+# profile subfolder
 def get_or_create_entity_profile_image_subfolder(
     entity_subfolder: Path, logger: Logger
 ):
@@ -63,6 +58,7 @@ def get_or_create_entity_profile_image_subfolder(
     return profile_subfolder
 
 
+# appeals subfolder
 def get_or_create_user_appeals_attachment_subfolder(
     user_subfolder: Path, logger: Logger
 ):
@@ -86,6 +82,7 @@ def get_or_create_user_appeals_attachment_subfolder(
     return appeals_subfolder
 
 
+# posts subfolder
 def get_or_create_user_posts_image_subfolder(user_subfolder: Path, logger: Logger):
     posts_subfolder = user_subfolder / "posts"
 
@@ -151,17 +148,12 @@ def validate_image_generate_name(
         # move file pointer to the beginning of the file
         image.file.seek(0)
 
-        # read the image file and check file size
-        # img_read = image.file.read()
-        # print(len(img_read))
-
         # Move to the end of the file, get image size, no need to read the file
         image.file.seek(0, 2)
         image_size = image.file.tell()
 
         # move file pointer to the beginning of the file
         image.file.seek(0)
-        # print(image_size)
 
         # if len(img_read) > MAX_SIZE: if image is read, we need to get the size using len()
         if image_size > MAX_SIZE:
@@ -204,10 +196,6 @@ def handle_image_operations(
 
         # move file pointer to the beginning of the file
         image.file.seek(0)
-
-        # read the image file and check file size
-        # img_read = image.file.read()
-        # print(len(img_read))
 
         # Move to the end of the file, get image size, no need to read the file
         image.file.seek(0, 2)
