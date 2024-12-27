@@ -1,5 +1,5 @@
-from sqlalchemy import TIMESTAMP, Boolean, Column, Enum, ForeignKey, String, func, text
-from sqlalchemy.dialects.postgresql import ENUM, UUID
+from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, String, func, text
+from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.db_sqlalchemy import Base
 

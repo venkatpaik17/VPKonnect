@@ -1774,7 +1774,7 @@ def report_item(
             )
         if post.status == "BAN":
             raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_409_CONFLICT,
                 detail="Post already banned",
             )
         if post.status == "FLB":
@@ -1793,7 +1793,7 @@ def report_item(
             )
         if comment.status == "BAN":
             raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_409_CONFLICT,
                 detail="Comment already banned",
             )
         if comment.status == "FLB":

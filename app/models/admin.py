@@ -278,22 +278,6 @@ class UserContentRestrictBanAppealDetail(Base):
     moderator = relationship("Employee", foreign_keys=[moderator_id])
 
 
-# class AppealRestrictJoinView(Base):
-#     __tablename__ = "appeal_restrict_join_view"
-#     id = Column(BigInteger(), primary_key=True)
-#     user_id = Column(UUID(as_uuid=True))
-#     report_id = Column(UUID(as_uuid=True))
-#     appeal_content_type = Column(String())
-#     appeal_content_id = Column(UUID(as_uuid=True))
-#     appeal_status = Column(String(length=3))
-#     user_restrict_ban_status = Column(String(length=3))
-#     user_restrict_ban_duration = Column(Integer())
-#     user_restrict_ban_is_deleted = Column(Boolean())
-#     user_restrict_ban_is_active = Column(Boolean())
-#     user_restrict_ban_content_type = Column(String())
-#     user_restrict_ban_content_id = Column(UUID(as_uuid=True))
-
-
 class GuidelineViolationLastAddedScore(Base):
     __tablename__ = "guideline_violation_last_added_score"
     id = Column(

@@ -768,7 +768,7 @@ def operations_after_appeal_reject(
         # appeal type post/comment, report type account
         if restrict_ban_content_type == "account":
             # check if content id is present in valid flagged posts or not
-            content_in_valid_flagged_content = admin_service.get_account_report_flagged_content_entry_valid_flagged_content_id_report_id(
+            content_in_valid_flagged_content = admin_service.check_account_report_flagged_content_entry_valid_flagged_content_id_report_id(
                 content_id=appeal_content_id, report_id=report_id, db_session=db
             )
 

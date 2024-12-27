@@ -745,7 +745,7 @@ def enforce_report_action_auto(
             )
         if post.status == "BAN":
             raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_409_CONFLICT,
                 detail="Reported post already banned",
             )
         if post.status == "FLB":
@@ -768,7 +768,7 @@ def enforce_report_action_auto(
             )
         if comment.status == "BAN":
             raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_409_CONFLICT,
                 detail="Reported comment already banned",
             )
         if comment.status == "FLB":
@@ -1243,7 +1243,7 @@ def enforce_report_action_manual(
             )
         if post.status == "BAN":
             raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_409_CONFLICT,
                 detail="Reported post already banned",
             )
         if post.status == "FLB":
@@ -1266,7 +1266,7 @@ def enforce_report_action_manual(
             )
         if comment.status == "BAN":
             raise HTTPException(
-                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=http_status.HTTP_409_CONFLICT,
                 detail="Reported comment already banned",
             )
         if comment.status == "FLB":

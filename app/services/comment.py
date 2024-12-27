@@ -134,7 +134,6 @@ def count_all_comments_likes(comment_id_list: list[UUID], db_session: Session):
         .all()
     )
 
-    # return defaultdict(int, results)
     return dict(results)
 
 

@@ -358,7 +358,7 @@ def get_account_report_flagged_content_entry_valid_flagged_content_id(
     )
 
 
-def get_account_report_flagged_content_entry_valid_flagged_content_id_report_id(
+def check_account_report_flagged_content_entry_valid_flagged_content_id_report_id(
     content_id: UUID, report_id: UUID, db_session: Session
 ):
     stmt = select(

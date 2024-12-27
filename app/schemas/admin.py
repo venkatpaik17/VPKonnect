@@ -11,23 +11,6 @@ from app.schemas import user as user_schema
 from app.utils.exception import CustomValidationError
 
 
-def transform_status(value: str):
-    status_map = {
-        "open": ["OPN"],
-        "closed": ["CSD"],
-        "review": ["URV"],
-        "resolved": ["RSD", "RSR"],
-        "future_resolved": ["FRS", "FRR"],
-        "accepted": ["ACP", "ACR"],
-        "rejected": ["REJ", "RJR"],
-    }
-    if value in status_map:
-        return status_map[value]
-    raise CustomValidationError(
-        status_code=400, detail=f"Invalid status in request: {value}"
-    )
-
-
 class SendEmail(BaseModel):
     template: str
     email: list[EmailStr]
