@@ -13,8 +13,43 @@ class EmployeeBase(BaseModel):
     personal_email: EmailStr
     work_email: EmailStr
     join_date: date
-    type: str
-    designation: str
+    type: Literal["FTE", "PTE", "CTE"]
+    designation: Literal[
+        "CEO",
+        "CTO",
+        "CSO",
+        "CMO",
+        "CFO",
+        "COO",
+        "DHR",
+        "DOP",
+        "DOM",
+        "HR1",
+        "HR2",
+        "HR3",
+        "HRM1",
+        "HRM2",
+        "SDE1F",
+        "SDE2F",
+        "SDE3F",
+        "SDE4F",
+        "SDM1F",
+        "SDM2F",
+        "SDE1B",
+        "SDE2B",
+        "SDE3B",
+        "SDE4B",
+        "SDM1B",
+        "SDM2B",
+        "SDET1",
+        "SDET2",
+        "SDET3",
+        "SDET4",
+        "CCA",
+        "CNM",
+        "CMM",
+        "UOA",
+    ]
     supervisor: str | None
 
 
@@ -32,7 +67,7 @@ class EmployeeRegister(EmployeeBase):
     city: str
     state_province: str
     zip_postal_code: str = Field(max_length=16)
-    country: str
+    country: str = Field(min_length=3, max_length=3)
 
     @validator("aadhaar", pre=True)
     def validate_aadhaar(cls, value):

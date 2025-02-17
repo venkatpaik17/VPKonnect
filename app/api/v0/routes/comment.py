@@ -130,7 +130,7 @@ def remove_comment(
         db_session=db,
     )
 
-    # get the post
+    # get the comment
     comment = comment_service.get_a_comment(
         comment_id=str(comment_id),
         status_not_in_list=["HID", "FLD", "RMV"],
@@ -171,7 +171,7 @@ def remove_comment(
         if curr_auth_user.id != post.user_id or curr_auth_user.id == comment.user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot delete comment.  is under full restriction",
+                detail="Cannot delete comment. User is under full restriction",
             )
 
     # old comment status

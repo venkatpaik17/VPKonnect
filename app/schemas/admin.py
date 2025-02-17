@@ -129,7 +129,7 @@ class EnforceReportActionManual(EnforceReportActionAuto):
 
 
 class CloseReport(BaseModel):
-    moderator_note: str
+    moderator_note: Literal["RF", "RNB", "RNF", "RND", "RNU", "SE", "UD", "UDI", "UDB"]
 
 
 class AppealRequest(BaseModel):
@@ -194,7 +194,7 @@ class AppealAction(BaseModel):
     case_number: int
     action: Literal["accept", "reject"]
     appeal_username: str
-    moderator_note: str
+    moderator_note: Literal["AS", "AF0"]
 
 
 class AppealUnderReviewUpdate(ReportUnderReviewUpdate):
@@ -219,8 +219,8 @@ class UserSendDeleteEmail(BaseModel):
     template: str
 
 
-class CloseAppeal(CloseReport):
-    pass
+class CloseAppeal(BaseModel):
+    moderator_note: Literal["AF1", "AF2", "AF3", "AF4", "ANU", "ANPC", "AE", "SE", "UD"]
 
 
 class AppUserMetrics(BaseModel):

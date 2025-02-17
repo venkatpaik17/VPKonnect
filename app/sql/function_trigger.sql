@@ -510,6 +510,8 @@ BEGIN
     IF attr = 'status' THEN
         IF (OLD.status = 'INA' AND NEW.status = 'ACT') AND (OLD.is_verified = FALSE AND NEW.is_verified = TRUE) THEN
             event_type := 'CRT';
+        ELSIF OLD.status IN ('ACT', 'RSP', 'RSF', 'TBN') AND NEW.status = 'INA' THEN
+            event_type := 'IAV';
         ELSIF OLD.status IN ('ACT', 'RSP', 'RSF') AND NEW.status = 'DAH' THEN
             event_type := 'DAV';
         ELSIF OLD.status IN ('ACT', 'RSP', 'RSF') AND NEW.status = 'PDH' THEN
@@ -871,7 +873,7 @@ FOR EACH ROW
 WHEN (OLD.status = 'HID' AND NEW.status = 'PUB')
 EXECUTE FUNCTION update_post_postlike_comment_commentlike_status(3);
 
-CREATE TRIGGER post_is_deleted_update_trigger
+CREATE TRIGGER comment_is_deleted_update_trigger
 AFTER UPDATE OF status ON comment
 FOR EACH ROW
 WHEN (OLD.is_deleted = FALSE AND NEW.is_deleted = TRUE)

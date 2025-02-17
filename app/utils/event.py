@@ -26,6 +26,8 @@ from app.utils import log as log_utils
 
 
 def send_logout_request(target):
+    logger: Logger = log_utils.get_logger()
+
     url = "http://127.0.0.1:8000/api/v0/users/logout"
     json_data = {
         "username": target.username,
@@ -33,7 +35,6 @@ def send_logout_request(target):
         "action": "all",
         "flow": "admin",
     }
-    logger: Logger = log_utils.get_logger()
 
     try:
         # Make the POST request with JSON body parameters and a timeout

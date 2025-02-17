@@ -503,7 +503,6 @@ def selected_reports_assign_update(
             detail=str(exc),
         ) from exc
 
-    # if not func call
     if valid_reports:
         messages.append(
             f"{len(valid_reports)} report(s), case number(s): {valid_reports} is/are assigned to {moderator.emp_id}"
@@ -567,41 +566,20 @@ def close_report(
             status_code=http_status.HTTP_409_CONFLICT, detail="Report is already closed"
         )
 
-    # if there are any OPN related report(s) which were not noticed before, put it/them under review and consider it/them in this action request
-    # get open related reports
-    open_related_reports_to_be_reviewed = (
-        admin_service.get_open_reports_for_specific_content_report(
-            case_number=case_number,
-            reported_item_id=report.reported_item_id,
-            reported_item_type=report.reported_item_type,
-            report_reason=report.report_reason,
-            report_reason_user=report.report_reason_user_id,
-            db_session=db,
-            moderator_id=report.moderator_id,
-        )
-    )
     open_related_reports_put_under_review_message = None
-
-    # get other related reports with same report reason, if any then update the status and moderator_note of the related reports same as the report
-    related_reports_query = admin_service.get_related_reports_for_specific_report_query(
-        case_number=case_number,
-        reported_user_id=str(report.reported_user_id),
-        reported_item_id=str(report.reported_item_id),
-        reported_item_type=report.reported_item_type,
-        status="URV",
-        moderator_id=curr_employee.id,
-        db_session=db,
-    )
-    related_reports_same_reason_query = related_reports_query.filter(
-        admin_model.UserContentReportDetail.report_reason == report.report_reason
-    )
-    related_reports_same_reason = related_reports_same_reason_query.all()
-
     try:
-        # update the report
-        report_query.update(
-            {"status": "CSD", "moderator_note": close_request.moderator_note},
-            synchronize_session=False,
+        # if there are any OPN related report(s) which were not noticed before, put it/them under review and consider it/them in this action request
+        # get open related reports
+        open_related_reports_to_be_reviewed = (
+            admin_service.get_open_reports_for_specific_content_report(
+                case_number=case_number,
+                reported_item_id=report.reported_item_id,
+                reported_item_type=report.reported_item_type,
+                report_reason=report.report_reason,
+                report_reason_user=report.report_reason_user_id,
+                db_session=db,
+                moderator_id=report.moderator_id,
+            )
         )
 
         # open related reports if any
@@ -623,6 +601,35 @@ def close_report(
 
                 open_related_reports_put_under_review_message = f"Additional {len(valid_reports)} related report(s), case number(s): {valid_reports} was/were put under review and was/were processed in this close request"
 
+        # get other related reports with same report reason, if any then update the status and moderator_note of the related reports same as the report
+        related_reports_query = (
+            admin_service.get_related_reports_for_specific_report_query(
+                case_number=case_number,
+                reported_user_id=str(report.reported_user_id),
+                reported_item_id=str(report.reported_item_id),
+                reported_item_type=report.reported_item_type,
+                status="URV",
+                moderator_id=curr_employee.id,
+                db_session=db,
+            )
+        )
+        related_reports_same_reason_query = related_reports_query.filter(
+            admin_model.UserContentReportDetail.report_reason == report.report_reason,
+            (
+                admin_model.UserContentReportDetail.report_reason_user_id
+                == report.report_reason_user_id
+                if report.report_reason_user_id
+                else True
+            ),
+        )
+        related_reports_same_reason = related_reports_same_reason_query.all()
+
+        # update the report
+        report_query.update(
+            {"status": "CSD", "moderator_note": close_request.moderator_note},
+            synchronize_session=False,
+        )
+
         # related reports
         if related_reports_same_reason:
             for related_report in related_reports_same_reason:
@@ -639,7 +646,6 @@ def close_report(
         ) from exc
     except HTTPException as exc:
         db.rollback()
-        logger.error(exc, exc_info=True)
         raise exc
     except Exception as exc:
         db.rollback()
@@ -708,6 +714,7 @@ def enforce_report_action_auto(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
+
     if report.status == "OPN":
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
@@ -750,7 +757,7 @@ def enforce_report_action_auto(
             )
         if post.status == "FLB":
             raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_409_CONFLICT,
                 detail="Reported post already flagged to be banned",
             )
 
@@ -807,7 +814,7 @@ def enforce_report_action_auto(
             reported_item_id=report.reported_item_id,
             reported_item_type=report.reported_item_type,
             report_reason=None,
-            report_reason_user=report.report_reason_user_id,
+            report_reason_user=None,
             db_session=db,
             moderator_id=report.moderator_id,
         )
@@ -1081,7 +1088,14 @@ def enforce_report_action_auto(
         if related_reports:
             # check if other related reports have same report reason, if yes, resolve those, else close
             for related_report in related_reports:
-                if related_report.report_reason == report.report_reason:
+                if related_report.report_reason == report.report_reason and (
+                    not related_report.report_reason_user_id
+                    or (
+                        related_report.report_reason_user_id
+                        and related_report.report_reason_user_id
+                        == report.report_reason_user_id
+                    )
+                ):
                     if no_action_or_active_action:
                         related_report.status = "RSR"
                         related_report.moderator_note = "RS"
@@ -1217,7 +1231,13 @@ def enforce_report_action_manual(
             status_code=http_status.HTTP_403_FORBIDDEN,
             detail="Not authorized to perform requested action",
         )
-    if report.status == "CSD":
+
+    if report.status == "OPN":
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail="Report should be under review for action to be taken",
+        )
+    elif report.status == "CSD":
         raise HTTPException(
             status_code=http_status.HTTP_409_CONFLICT,
             detail="Report to be taken action on, is closed",
@@ -1305,7 +1325,7 @@ def enforce_report_action_manual(
             reported_item_id=report.reported_item_id,
             reported_item_type=report.reported_item_type,
             report_reason=None,
-            report_reason_user=report.report_reason_user_id,
+            report_reason_user=None,
             db_session=db,
             moderator_id=report.moderator_id,
         )
@@ -1613,7 +1633,14 @@ def enforce_report_action_manual(
         if related_reports:
             # check if other related reports have same report reason, if yes, resolve those, else close
             for related_report in related_reports:
-                if related_report.report_reason == report.report_reason:
+                if related_report.report_reason == report.report_reason and (
+                    not related_report.report_reason_user_id
+                    or (
+                        related_report.report_reason_user_id
+                        and related_report.report_reason_user_id
+                        == report.report_reason_user_id
+                    )
+                ):
                     if is_active:
                         related_report.status = "RSR"
                         related_report.moderator_note = "RS"
@@ -2251,7 +2278,7 @@ def check_appeal_policy(
         if posts_appeal_reject:
             appeal_entry.is_policy_followed = False
             message = f"Appeal policy check: Failed. Appeal case number: {case_number}."
-            detail = f"Appeals previously linked to {len(posts_appeal_reject)} out of {len(valid_flagged_content_posts_ids)} post(s) associated with the account report is/are already rejected. Hence the appeal for revoking the restriction or ban on account stands rejected."
+            detail = f"Appeals previously made for revoking the ban on {len(posts_appeal_reject)} out of {len(valid_flagged_content_posts_ids)} post(s) associated with the account restriction or ban is/are already rejected. Hence the appeal for revoking the restriction or ban on account stands rejected."
         else:
             appeal_entry.is_policy_followed = True
 
@@ -2270,7 +2297,7 @@ def check_appeal_policy(
         if content_appeal_reject:
             appeal_entry.is_policy_followed = False
             message = f"Appeal policy check: Failed. Appeal case number: {case_number}"
-            detail = f"Appeal previously linked to a {content_appeal_reject.content_type} associated with the account report is already rejected. Hence the appeal for revoking the restriction or ban on account stands rejected."
+            detail = f"Appeal previously made for revoking ban on {content_appeal_reject.content_type} associated with the account restriction or ban is already rejected. Hence the appeal for revoking the restriction or ban on account stands rejected."
         else:
             appeal_entry.is_policy_followed = True
 
@@ -2289,7 +2316,7 @@ def check_appeal_policy(
         if account_appeal_reject:
             appeal_entry.is_policy_followed = False
             message = f"Appeal policy check: Failed. Appeal case number: {case_number}"
-            detail = "Appeal previously linked to account associated with the post report is already rejected. Hence the appeal for revoking the ban on post stands rejected."
+            detail = "Appeal previously made for revoking restriction or ban on account associated with the post ban is already rejected. Hence the appeal for revoking the ban on post stands rejected."
         else:
             appeal_entry.is_policy_followed = True
 
@@ -2308,7 +2335,7 @@ def check_appeal_policy(
         if account_appeal_reject:
             appeal_entry.is_policy_followed = False
             message = f"Appeal policy check: Failed. Appeal case number: {case_number}"
-            detail = f"Appeal previously linked to account associated with the {restrict_ban_entry.content_type} report is already rejected. Hence the appeal for revoking the ban on {restrict_ban_entry.content_type} stands rejected."
+            detail = f"Appeal previously made for revoking restriction or ban on account associated with the {restrict_ban_entry.content_type} ban is already rejected. Hence the appeal for revoking the ban on {restrict_ban_entry.content_type} stands rejected."
         else:
             appeal_entry.is_policy_followed = True
 
@@ -2378,34 +2405,19 @@ def close_appeal(
             status_code=http_status.HTTP_409_CONFLICT, detail="Appeal is already closed"
         )
 
-    # if there are any OPN related appeal(s) which were not noticed before, put it/them under review and consider it/them in this action request
-    # get open related appeals
-    open_related_appeals_to_be_reviewed = (
-        admin_service.get_open_appeals_for_specific_content_appeal(
-            case_number=case_number,
-            content_id=appeal.content_id,
-            content_type=appeal.content_type,
-            db_session=db,
-            moderator_id=appeal.moderator_id,
-        )
-    )
-
-    # get other related appeals if any then update the status and moderator_note of the related appeals same as the appeal
-    related_appeals = admin_service.get_related_appeals_for_specific_appeal(
-        case_number=case_number,
-        content_id=appeal.content_id,
-        content_type=appeal.content_type,
-        status="URV",
-        moderator_id=curr_employee.id,
-        db_session=db,
-    ).all()
-
     open_related_appeals_put_under_review_message = None
-
     try:
-        # update the appeal
-        appeal.status = "CSD"
-        appeal.moderator_note = close_request.moderator_note
+        # if there are any OPN related appeal(s) which were not noticed before, put it/them under review and consider it/them in this action request
+        # get open related appeals
+        open_related_appeals_to_be_reviewed = (
+            admin_service.get_open_appeals_for_specific_content_appeal(
+                case_number=case_number,
+                content_id=appeal.content_id,
+                content_type=appeal.content_type,
+                db_session=db,
+                moderator_id=appeal.moderator_id,
+            )
+        )
 
         if open_related_appeals_to_be_reviewed:
             open_related_appeals_case_numbers = [
@@ -2425,10 +2437,25 @@ def close_appeal(
 
                 open_related_appeals_put_under_review_message = f"Additional {len(valid_appeals)} related appeal(s), case number(s): {valid_appeals} was/were put under review and was/were processed in this close request"
 
+        # get other related appeals if any then update the status and moderator_note of the related appeals same as the appeal
+        related_appeals = admin_service.get_related_appeals_for_specific_appeal(
+            case_number=case_number,
+            content_id=appeal.content_id,
+            content_type=appeal.content_type,
+            status="URV",
+            moderator_id=curr_employee.id,
+            db_session=db,
+        ).all()
+
+        # update the appeal
+        appeal.status = "CSD"
+        appeal.moderator_note = close_request.moderator_note
+
         if related_appeals:
-            for related_report in related_appeals:
-                related_report.status = "CSD"
-                related_report.moderator_note = close_request.moderator_note
+            for related_appeal in related_appeals:
+                related_appeal.is_policy_followed = True
+                related_appeal.status = "CSD"
+                related_appeal.moderator_note = close_request.moderator_note
 
         db.commit()
     except SQLAlchemyError as exc:
@@ -2438,6 +2465,9 @@ def close_appeal(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error processing close appeal request",
         ) from exc
+    except HTTPException as exc:
+        db.rollback()
+        raise exc
     except Exception as exc:
         db.rollback()
         logger.error(exc, exc_info=True)
@@ -2469,7 +2499,7 @@ def close_appeal(
     }
 
 
-# appeal accept
+# appeal accept/reject
 @router.post("/appeals/action")
 @auth_utils.authorize(["content_admin", "content_mgmt"])
 def appeal_action(
@@ -2544,6 +2574,37 @@ def appeal_action(
             status_code=http_status.HTTP_400_BAD_REQUEST,
             detail="Check appeal policy before appeal action",
         )
+
+    open_related_appeals_put_under_review_message = None
+    # if there are any OPN related appeal(s) which were not noticed before, put it/them under review and consider it/them in this action request
+    # get open related appeals
+    open_related_appeals_to_be_reviewed = (
+        admin_service.get_open_appeals_for_specific_content_appeal(
+            case_number=action_request.case_number,
+            content_id=appeal_entry.content_id,
+            content_type=appeal_entry.content_type,
+            db_session=db,
+            moderator_id=appeal_entry.moderator_id,
+        )
+    )
+
+    if open_related_appeals_to_be_reviewed:
+        open_related_appeals_case_numbers = [
+            related_appeal.case_number
+            for related_appeal in open_related_appeals_to_be_reviewed
+        ]
+        if open_related_appeals_case_numbers:
+            valid_appeals = selected_appeals_under_review_update(
+                appeals_request=admin_schema.AppealUnderReviewUpdate(
+                    case_number_list=open_related_appeals_case_numbers
+                ),
+                db=db,
+                logger=logger,
+                current_employee=current_employee,
+                is_func_call=True,
+            )
+
+            open_related_appeals_put_under_review_message = f"Additional {len(valid_appeals)} related appeal(s), case number(s): {valid_appeals} was/were put under review and was/were processed in this close request"
 
     # get report entry
     # get restrict_ban entry associated with the appeal
@@ -2622,6 +2683,7 @@ def appeal_action(
             ).all()
             if related_appeals:
                 for appeal in related_appeals:
+                    appeal.is_policy_followed = True
                     appeal.status = "ACR"
                     appeal.moderator_note = action_request.moderator_note
 
@@ -2657,6 +2719,7 @@ def appeal_action(
             ).all()
             if related_appeals:
                 for appeal in related_appeals:
+                    appeal.is_policy_followed = True
                     appeal.status = "RJR"
                     appeal.moderator_note = action_request.moderator_note
         else:
@@ -2718,6 +2781,13 @@ def appeal_action(
     )
 
     message = f"Request processed successfully. Requested action taken on appeal case number {action_request.case_number}."
+    if open_related_appeals_put_under_review_message:
+        return {
+            "message": message,
+            "detail": moderator_note_full,
+            "additional_message": open_related_appeals_put_under_review_message,
+        }
+
     return {
         "message": message,
         "detail": moderator_note_full,
@@ -2746,7 +2816,7 @@ def get_users(
         ]
         | None
     ) = Query(None),
-    sort: str | None = Query(None),
+    sort: Literal["asc", "desc"] | None = Query(None),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
@@ -2841,7 +2911,7 @@ def get_all_user_posts(
         "flagged_banned",
         "hidden",
         "removed",
-        "flagged_banned",
+        "flagged_deleted",
     ] = Query(),
     limit: int = Query(3, le=12),
     last_post_id: UUID = Query(None),
@@ -2916,13 +2986,13 @@ def get_employees(
             "suspended",
         ]
         | None
-    ) = None,
-    type_: Literal["full_time", "part_time", "contract"] | None = None,
+    ) = Query(None),
+    type_: Literal["full_time", "part_time", "contract"] | None = Query(None),
     level: (
         Literal["management", "sofware_dev", "hr", "content_admin", "content_mgmt"]
         | None
-    ) = None,
-    sort: str | None = Query(None),
+    ) = Query(None),
+    sort: Literal["asc", "desc"] | None = Query(None),
     db: Session = Depends(get_db),
     current_employee: auth_schema.AccessTokenPayload = Depends(
         auth_utils.get_current_user
@@ -3012,7 +3082,7 @@ def get_post(
     )
     if not post_user:
         return HTTPException(
-            status_code=http_status.HTTP_404_NOT_FOUND, detail="Post not found"
+            status_code=http_status.HTTP_404_NOT_FOUND, detail="Post owner not found"
         )
 
     post_response = post_schema.PostAdminResponse(

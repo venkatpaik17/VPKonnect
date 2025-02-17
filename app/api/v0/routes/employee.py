@@ -26,12 +26,12 @@ MAX_SIZE = settings.image_max_size
     status_code=status.HTTP_201_CREATED,
 )
 def create_employee(
+    image: UploadFile,
     request: employee_schema.EmployeeRegister = FormDepends(
         employee_schema.EmployeeRegister
     ),  # type: ignore
     db: Session = Depends(get_db),
     logger: Logger = Depends(log_utils.get_logger),
-    image: UploadFile | None = None,
 ):
     # check both entered passwords are same
     if request.password != request.confirm_password:
@@ -86,24 +86,22 @@ def create_employee(
         entity_subfolder=employee_subfolder, logger=logger
     )
 
-    image_path = None
     try:
-        if image:
-            # image validation and handling
-            image_name = image_utils.validate_image_generate_name(
-                username=emp_id, image=image, logger=logger
-            )
+        # image validation and handling
+        image_name = image_utils.validate_image_generate_name(
+            username=emp_id, image=image, logger=logger
+        )
 
-            add_employee.profile_picture = image_name
+        add_employee.profile_picture = image_name
 
-            image_path = profile_subfolder / image_name
+        image_path = profile_subfolder / image_name
 
-            # write image to target
-            image_utils.write_image(
-                image=image,
-                image_path=image_path,
-                logger=logger,
-            )
+        # write image to target
+        image_utils.write_image(
+            image=image,
+            image_path=image_path,
+            logger=logger,
+        )
 
         db.add(add_employee)
         db.commit()

@@ -668,15 +668,13 @@ def change_password_reset(
     )
 
     try:
-        # update is_deleted to True for all reset tokens and blacklist all token ids
+        # update is_deleted to True for all reset tokens
         user_password_reset_tokens_query.update(
             {"is_deleted": True}, synchronize_session=False
         )
         reset_token_ids = [
             item.code_token_id for item in user_password_reset_tokens_query.all()
         ]
-        for token_id in reset_token_ids:
-            auth_utils.blacklist_token(token=token_id)
 
         # hash the new password and update the password field in user table
         hashed_password = password_utils.get_hash(password=reset.password)
@@ -688,6 +686,10 @@ def change_password_reset(
         )
         db.add(add_password_change_history_entry)
         db.commit()
+
+        # blacklist all token ids
+        for token_id in reset_token_ids:
+            auth_utils.blacklist_token(token=token_id)
 
         email_utils.send_email(email_subject, email_details, background_tasks)
 
@@ -2032,7 +2034,7 @@ def appeal_content(
                     detail="This comment is permanently banned and cannot be appealed for review. This decision cannot be reversed because 28 days have passed since your comment was banned.",
                 )
 
-        # check if the post/comment is really banned/deleted or not
+        # check if the post/comment is really banned or not
         if appeal_user_request.content_type == "post":
             banned_post = post_service.get_a_post(
                 post_id=str(appeal_user_request.content_id),

@@ -1,0 +1,5675 @@
+{
+	"info": {
+		"_postman_id": "6cc0c450-ee0f-4359-8df7-2998a1c9c945",
+		"name": "VPKonnect",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "28086491"
+	},
+	"item": [
+		{
+			"name": "User",
+			"item": [
+				{
+					"name": "User Register",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let jsonResponse;",
+									"",
+									"try {",
+									"    jsonResponse = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 409) {",
+									"    if (jsonResponse.hasOwnProperty(\"detail\")) {",
+									"        const detail = jsonResponse.detail;",
+									"        ",
+									"        if (typeof detail === 'string' && detail.includes(\"Pending\")) {",
+									"            const email = detail.split(\" \")[0];",
+									"            const url = \"http://127.0.0.1:8000/api/v0\"",
+									"            ",
+									"            const requestData = {",
+									"                url: `${url}/users/send-verify-email`,",
+									"                method: 'POST',",
+									"                header: {",
+									"                    'Content-Type': 'application/json'",
+									"                },",
+									"                body: {",
+									"                    mode: 'raw',",
+									"                    raw: JSON.stringify({",
+									"                        email: email,",
+									"                        type: 'USV',",
+									"                    })",
+									"                }",
+									"            };",
+									"",
+									"            pm.sendRequest(requestData, function (err, response) {",
+									"                if (err) {",
+									"                    console.error('Request failed:', err);",
+									"                } else {",
+									"                    try {",
+									"                        console.log(response.json());",
+									"                    } catch (e) {",
+									"                        console.error('Failed to parse response JSON:', e);",
+									"                    }",
+									"                }",
+									"            });",
+									"        } else {",
+									"            console.log('Detail does not include \"Pending\":', detail);",
+									"        }",
+									"    } else {",
+									"        console.log('JSON response does not contain \"detail\":', jsonResponse);",
+									"    }",
+									"} else {",
+									"    console.log('Status code is not 409:', pm.response.code);",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "first_name",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "last_name",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "username",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "email",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "confirm_password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "date_of_birth",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "gender",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "country",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "country_phone_code",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "phone_number",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "image",
+									"value": "",
+									"type": "file"
+								},
+								{
+									"key": "bio",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "account_visibility",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/users/register",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"register"
+							]
+						},
+						"description": "### Register User\n\nThis endpoint allows the client to register a new user.\n\n#### Request Body Parameters\n\n- `first_name` (text): The first name of the user.\n    \n- `last_name` (text): The last name of the user.\n    \n- `username` (text): The username chosen by the user.\n    \n- `email` (text): The email address of the user.\n    \n- `password` (text): The chosen password for the account.\n    \n- `confirm_password` (text): The confirmation of the chosen password.\n    \n- `date_of_birth` (text): The date of birth of the user.\n    \n- `gender` (text): The gender of the user.\n    \n- `country` (text): The country of the user.\n    \n- `country_phone_code` (text): The phone code of the user's country.\n    \n- `phone_number` (text): The phone number of the user.\n    \n- `image` (file): The user's profile image.\n    \n- `bio` (text): The bio or description of the user.\n    \n- `account_visibility` (text): The visibility setting for the user's account.\n    \n\n#### Response\n\nThe response is a JSON object with a `message` key.\n\n#### Response JSON Schema\n\n``` json\n{\n    \"type\": \"object\",\n    \"properties\": {\n        \"message\": {\n            \"type\": \"string\"\n        }\n    }\n}\n\n ```\n\n#### Response\n\n``` json\n{\n    \"message\": \"User registration verification process - An email has been sent to jorge.clark@gml.com for verification.\"\n}\n\n ```"
+					},
+					"response": []
+				},
+				{
+					"name": "Send Verify Email",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"\",\n    \"type\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/users/send-verify-email",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"send-verify-email"
+							]
+						},
+						"description": "### Send Verify Email\n\nThis endpoint is used to send a verification email to the specified email address.\n\n#### Request Body\n\n- email (string, required): The email address to which the verification email will be sent.\n    \n- type (string, required): The type of verification email to be sent.\n    \n\n#### Response\n\nThe response to this request can be documented using the following JSON schema:\n\n``` json\n{\n  \"type\": \"object\",\n  \"properties\": {\n    \"status\": {\n      \"type\": \"string\"\n    },\n    \"message\": {\n      \"type\": \"string\"\n    }\n  }\n}\n\n ```\n\nThis endpoint is used to send a verification email to the specified email address.\n\n#### Request Body\n\n- email (string, required): The email address to which the verification email will be sent.\n    \n- type (string, required): The type of verification email to be sent.\n    \n\n#### Response\n\nThe response of this request is a JSON schema representing the structure of the response data. The schema includes the properties and data types of the response object."
+					},
+					"response": []
+				},
+				{
+					"name": "User Signup Verify",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "user_verify_token",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/users/register/verify",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"register",
+								"verify"
+							]
+						},
+						"description": "### Register User Verification\n\nThis endpoint is used to verify the user registration.\n\n#### Request Body\n\n- `user_verify_token` (text): The token for user verification.\n    \n\n#### Response\n\n- Status: 200\n    \n- Content-Type: application/json\n    \n\n#### Response Body (JSON Schema)\n\n``` json\n{\n    \"type\": \"object\",\n    \"properties\": {\n        \"message\": {\"type\": \"string\"},\n        \"data\": {\n            \"type\": \"object\",\n            \"properties\": {\n                \"first_name\": {\"type\": \"string\"},\n                \"last_name\": {\"type\": \"string\"},\n                \"username\": {\"type\": \"string\"},\n                \"email\": {\"type\": \"string\"},\n                \"repr_id\": {\"type\": \"string\"},\n                \"account_visibility\": {\"type\": \"string\"},\n                \"profile_picture\": {\"type\": \"string\"},\n                \"created_at\": {\"type\": \"string\"}\n            }\n        }\n    }\n}\n\n ```"
+					},
+					"response": []
+				},
+				{
+					"name": "User Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"try {",
+									"    const jsonResponse = pm.response.json();",
+									"",
+									"    if (pm.response.code === 200) { ",
+									"        if (jsonResponse.access_token) {",
+									"            pm.environment.set(\"JWT\", jsonResponse.access_token);",
+									"        } else {",
+									"            console.warn('Access token not found in the response.');",
+									"        }",
+									"    } else {",
+									"        console.warn('Response code is not 200. Skipping processing.');",
+									"        return;",
+									"    }",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response or response is not JSON:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    var formData = pm.request.body.formdata;",
+									"    var userDeviceInfoValue = null;",
+									"",
+									"    if (formData) {",
+									"        formData.each(function(param) {",
+									"            if (param.key === 'user_device_info') {",
+									"                userDeviceInfoValue = param.value;",
+									"                return false;",
+									"            }",
+									"        });",
+									"    } else {",
+									"        console.warn('Form data not found in the request.');",
+									"        return;",
+									"    }",
+									"",
+									"    if (userDeviceInfoValue !== null) {",
+									"        pm.environment.set(\"device_info\", userDeviceInfoValue);",
+									"    } else {",
+									"        console.warn('User device info not found in the form data.');",
+									"    }",
+									"} catch (e) {",
+									"    console.error('Failed to process form data:', e);",
+									"    return;",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "username",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "user_device_info",
+									"value": "{{$randomUserAgent}}",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/users/login",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Logout",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code == 200){",
+									"    pm.environment.unset(\"JWT\");",
+									"    pm.environment.unset(\"device_info\")",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"\",\n    \"device_info\": \"{{device_info}}\", //not required for action = all\n    \"action\": \"\",\n    \"flow\": \"user\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/users/logout",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"logout"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Password Reset",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "user_email",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/users/password/reset",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"password",
+								"reset"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Password Change - Reset",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "confirm_password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "reset_token",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/users/password/change",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"password",
+								"change"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Password Change - Update",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200) {",
+									"    if (responseJson.hasOwnProperty('access_token')){",
+									"        pm.environment.set('JWT', responseJson.access_token);",
+									"        console.log('Token refreshed. Re-send request.');",
+									"        return;",
+									"    }",
+									"",
+									"    if (!responseJson.hasOwnProperty('user')) {",
+									"        console.error('Response JSON does not contain \"user\" property.');",
+									"        return;",
+									"    }",
+									"",
+									"    const username = responseJson.user;",
+									"    const url = \"http://127.0.0.1:8000/api/v0\";",
+									"    console.log('Username:', username);",
+									"",
+									"    const requestData = {",
+									"        url: `${url}/users/logout`,",
+									"        method: 'POST',",
+									"        header: {",
+									"            'Content-Type': 'application/json'",
+									"        },",
+									"        body: {",
+									"            mode: 'raw',",
+									"            raw: JSON.stringify({",
+									"                username: username,",
+									"                action: 'all',",
+									"                flow: 'admin'",
+									"            })",
+									"        }",
+									"    };",
+									"",
+									"    pm.sendRequest(requestData, function (err, logoutResponse) {",
+									"        if (err) {",
+									"            console.error('Error logging out:', err);",
+									"        } else {",
+									"            try {",
+									"                const logoutResponseJson = logoutResponse.json();",
+									"                console.log('Logout response:', logoutResponseJson);",
+									"",
+									"                if (logoutResponse.code === 200) {",
+									"                    pm.environment.unset('JWT');",
+									"                    pm.environment.unset('device_info');",
+									"                }else {",
+									"                    console.error('Logout failed:', logoutResponse.code, logoutResponse.status);",
+									"                }",
+									"            } catch (e) {",
+									"                console.error('Failed to parse logout response JSON:', e);",
+									"            }",
+									"        }",
+									"    });",
+									"} else {",
+									"    const errorDetail = {",
+									"        status: `${pm.response.code} ${pm.response.status}`,",
+									"        detail: responseJson.detail || 'No detail provided'",
+									"    };",
+									"    console.error('Error updating user password:', errorDetail);",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "old_password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "new_password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "confirm_new_password",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/users/password/update",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"password",
+								"update"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Follow/Unfollow",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"\",\n    \"action\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/users/follow",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"follow"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Follow Request - Accept/Reject",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"action\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/users/follow/requests/:username",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"follow",
+								"requests",
+								":username"
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": "venp"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Followers/Following",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/:username/follow?fetch=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								":username",
+								"follow"
+							],
+							"query": [
+								{
+									"key": "fetch",
+									"value": ""
+								}
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Follow Requests",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/follow/requests",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"follow",
+								"requests"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Follower Remove",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/follow/remove/:username",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"follow",
+								"remove",
+								":username"
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Username Change",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "new_username",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/users/username/change",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"username",
+								"change"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Profile",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200) {",
+									"    if (responseJson.hasOwnProperty('access_token')){",
+									"        pm.environment.set('JWT', responseJson.access_token);",
+									"        console.log('Token refreshed. Re-send request.');",
+									"        return;",
+									"    }",
+									"",
+									"    if (!responseJson.hasOwnProperty('username')) {",
+									"        console.error('Response JSON does not contain \"username\" property.');",
+									"        return;",
+									"    }",
+									"    const username = responseJson.username;",
+									"    const url = \"http://127.0.0.1:8000/api/v0\"",
+									"    const authHeader = pm.request.headers.get('Authorization');",
+									"    ",
+									"    const posts_url = `${url}/users/${username}/posts?status=published`;",
+									"    const requestData = {",
+									"        url: posts_url,",
+									"        method: 'GET',",
+									"        header: {",
+									"            'Authorization': authHeader,",
+									"            'Content-Type': 'application/json'",
+									"        },",
+									"    };",
+									"    ",
+									"    pm.sendRequest(requestData, function (err, res) {",
+									"        if (err) {",
+									"            console.error(\"Error fetching posts:\", err);",
+									"        } else {",
+									"            try {",
+									"                const userPosts = res.json();",
+									"                // const getPostsScript = pm.environment.get('getPostsScript');",
+									"",
+									"                // if (getPostsScript) {",
+									"                try {",
+									"                    myPackage.getPostsResponse(userPosts);",
+									"                } catch (e) {",
+									"                    console.error('Error executing package function:', e);",
+									"                }",
+									"                // } else {",
+									"                //     console.error('No script code found in environment variables.');",
+									"                // }",
+									"            } catch (e) {",
+									"                console.error('Failed to parse JSON response for user posts:', e);",
+									"            }",
+									"        }",
+									"    });",
+									"} else {",
+									"    const errorDetail = {",
+									"        status: `${pm.response.code} ${pm.response.status}`,",
+									"        detail: responseJson.detail || 'No detail provided'",
+									"    };",
+									"    console.error(\"Error fetching user profile:\", errorDetail);",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/:username/profile",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								":username",
+								"profile"
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Posts",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getPostsResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/:username/posts?status=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								":username",
+								"posts"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": ""
+								}
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Posts Pagination",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getPostsResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/:username/posts?status=&last_post_id={{lastPostId}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								":username",
+								"posts"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": ""
+								},
+								{
+									"key": "last_post_id",
+									"value": "{{lastPostId}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Feed",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getAllFeedPostsResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/feed",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"feed"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Feed Pagination",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getAllFeedPostsResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/feed?last_seen_post_id={{lastSeenPostId}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"feed"
+							],
+							"query": [
+								{
+									"key": "last_seen_post_id",
+									"value": "{{lastSeenPostId}}"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Deactivate/Delete",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200){",
+									"    if (responseJson.hasOwnProperty('access_token')){",
+									"        pm.environment.set('JWT', responseJson.access_token);",
+									"        console.log('Token refreshed. Re-send request.');",
+									"        return;",
+									"    }",
+									"    pm.environment.unset(\"JWT\");",
+									"    pm.environment.unset(\"device_info\")",
+									"    ",
+									"    const jar = pm.cookies.jar();",
+									"    const url = pm.request.url.toString();",
+									"    jar.clear(url, function (error) {",
+									"        if (error) {",
+									"            console.error('Error clearing cookies for URL:', url, error);",
+									"        } else {",
+									"            console.log('Cookies cleared for URL:', url);",
+									"        }",
+									"    });",
+									"} else {",
+									"    console.log('Response code:', pm.response.code);",
+									"}",
+									"",
+									"",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "password",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/users/deactivate?action=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"deactivate"
+							],
+							"query": [
+								{
+									"key": "action",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Report Item",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"\",\n    \"item_id\": \"\",  // only for post or comment, not required for account\n    \"item_type\": \"\",\n    \"reason\": \"\"\n    // \"reason_username\": \"\" // only for impersonation\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/users/report",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"report"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appeal Content",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "username",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "email",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "content_type",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "content_id",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "detail",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "attachment",
+									"value": "",
+									"type": "file",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/users/appeal",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"appeal"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Violation Details",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/violation",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								"violation"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "About User",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/users/:username/about",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"users",
+								":username",
+								"about"
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Post",
+			"item": [
+				{
+					"name": "Create Post",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "image",
+									"value": "",
+									"type": "file"
+								},
+								{
+									"key": "caption",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/posts/?post_type=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								""
+							],
+							"query": [
+								{
+									"key": "post_type",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Post",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 303) {",
+									"    const location = pm.response.headers.get('location');",
+									"    ",
+									"    if (location) {",
+									"        const segments = location.split(\"/\");",
+									"        ",
+									"        if (segments.length > 5) {",
+									"            const username = segments[4];",
+									"            ",
+									"            if (segments[5] === \"profile\") {",
+									"                const requestUrl = `http://127.0.0.1:8000${location}`;",
+									"                const authHeader = pm.request.headers.get('Authorization');",
+									"                ",
+									"                const profileRequest = {",
+									"                    url: requestUrl,",
+									"                    method: 'GET',",
+									"                    header: {",
+									"                        'Authorization': authHeader,",
+									"                        'Content-Type': 'application/json'",
+									"                    }",
+									"                };",
+									"",
+									"                pm.sendRequest(profileRequest, function (err, res) {",
+									"                    if (err) {",
+									"                        console.error(\"Error fetching user profile:\", err);",
+									"                        return;",
+									"                    }",
+									"",
+									"                    let userProfile;",
+									"                    try {",
+									"                        userProfile = res.json();",
+									"                    } catch (e) {",
+									"                        console.error('Failed to parse user profile response:', e);",
+									"                        return;",
+									"                    }",
+									"",
+									"                    if (res.code === 200) {",
+									"                        console.log('User Profile:', userProfile);",
+									"                        const postsUrl = `http://127.0.0.1:8000/api/v0/users/${username}/posts?status=published`;",
+									"",
+									"                        const postsRequest = {",
+									"                            url: postsUrl,",
+									"                            method: 'GET',",
+									"                            header: {",
+									"                                'Authorization': authHeader,",
+									"                                'Content-Type': 'application/json'",
+									"                            }",
+									"                        };",
+									"",
+									"                        pm.sendRequest(postsRequest, function (err, res) {",
+									"                            if (err) {",
+									"                                console.error(\"Error fetching posts:\", err);",
+									"                                return;",
+									"                            }",
+									"",
+									"                            let userPosts;",
+									"                            try {",
+									"                                userPosts = res.json();",
+									"                                // const getPostsScript = pm.environment.get('getPostsScript');",
+									"                                // if (getPostsScript) {",
+									"                                try {",
+									"                                    myPackage.getPostsResponse(userPosts);",
+									"                                } catch (e) {",
+									"                                    console.error('Error executing package function:', e);",
+									"                                }",
+									"                                // } else {",
+									"                                //     console.error('No script code found in environment variables.');",
+									"                                // }",
+									"                            } catch (e) {",
+									"                                console.error('Failed to parse user posts response:', e);",
+									"                                return;",
+									"                            }",
+									"                            // console.log('User Posts:', userPosts);",
+									"                        });",
+									"                    } else {",
+									"                        const errorDetail = {",
+									"                            status: `${res.code} ${res.status}`,",
+									"                            detail: userProfile.detail || 'No detail provided'",
+									"                        };",
+									"                        console.log(\"Error fetching user profile:\", errorDetail);",
+									"                    }",
+									"                });",
+									"            } else {",
+									"                console.log(\"Profile segment not found in location URL.\");",
+									"            }",
+									"        } else {",
+									"            console.log(\"Location URL segments are insufficient to extract 'username' or check for 'profile'.\");",
+									"        }",
+									"    } else {",
+									"        console.log(\"No 'Location' header found in the response.\");",
+									"    }",
+									"} else {",
+									"    console.log(`Expected 303 status code but received ${pm.response.code}.`);",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/posts/:post_id",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								":post_id"
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Edit Post",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "image",
+									"value": "",
+									"type": "file",
+									"disabled": true
+								},
+								{
+									"key": "caption",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/posts/:post_id?post_type=&action=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								":post_id"
+							],
+							"query": [
+								{
+									"key": "post_type",
+									"value": ""
+								},
+								{
+									"key": "action",
+									"value": ""
+								}
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Post",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/posts/:post_id",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								":post_id"
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Like/Unlike Post",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed.  Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/posts/:post_id/like?action=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								":post_id",
+								"like"
+							],
+							"query": [
+								{
+									"key": "action",
+									"value": ""
+								}
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Post Like Users",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getAllPostLikeUsersResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/posts/:post_id/like",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								":post_id",
+								"like"
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Post Like Users Pagination",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getAllPostLikeUsersResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/posts/:post_id/like?last_like_user_id={{lastLikeUserId}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								":post_id",
+								"like"
+							],
+							"query": [
+								{
+									"key": "last_like_user_id",
+									"value": "{{lastLikeUserId}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Comment",
+			"item": [
+				{
+					"name": "Create Comment",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "content",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/posts/:post_id/comments",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								":post_id",
+								"comments"
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Comments",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getAllCommentsResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/posts/:post_id/comments",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								":post_id",
+								"comments"
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Comments Pagination",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getAllCommentsResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/posts/:post_id/comments?last_comment_id={{lastCommentId}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"posts",
+								":post_id",
+								"comments"
+							],
+							"query": [
+								{
+									"key": "last_comment_id",
+									"value": "{{lastCommentId}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Edit Comment",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "content",
+									"value": "",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/comments/:comment_id",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"comments",
+								":comment_id"
+							],
+							"variable": [
+								{
+									"key": "comment_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Comment",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/comments/:comment_id",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"comments",
+								":comment_id"
+							],
+							"variable": [
+								{
+									"key": "comment_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Like/Unlike Comment",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/comments/:comment_id/like?action=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"comments",
+								":comment_id",
+								"like"
+							],
+							"query": [
+								{
+									"key": "action",
+									"value": ""
+								}
+							],
+							"variable": [
+								{
+									"key": "comment_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Comment Like Users",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getAllCommentLikeUsersResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/comments/:comment_id/like",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"comments",
+								":comment_id",
+								"like"
+							],
+							"variable": [
+								{
+									"key": "comment_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Comment Like Users Pagination",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getAllCommentLikeUsersResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/comments/:comment_id/like?last_like_user_id={{lastLikeUserId}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"comments",
+								":comment_id",
+								"like"
+							],
+							"query": [
+								{
+									"key": "last_like_user_id",
+									"value": "{{lastLikeUserId}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "comment_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Admin",
+			"item": [
+				{
+					"name": "Report Dashboard",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/reports/dashboard?status=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"reports",
+								"dashboard"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Report Dashboard - Admin",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/reports/admin-dashboard?type_=&status=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"reports",
+								"admin-dashboard"
+							],
+							"query": [
+								{
+									"key": "type_",
+									"value": ""
+								},
+								{
+									"key": "status",
+									"value": ""
+								},
+								{
+									"key": "emp_id",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "reported_at",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Report",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/reports/:case_number",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"reports",
+								":case_number"
+							],
+							"variable": [
+								{
+									"key": "case_number",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Related Open Reports",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/reports/:case_number/related?admin=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"reports",
+								":case_number",
+								"related"
+							],
+							"query": [
+								{
+									"key": "admin",
+									"value": ""
+								}
+							],
+							"variable": [
+								{
+									"key": "case_number",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Assign Reports",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"case_number_list\": [],\n    \"moderator_emp_id\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/admin/reports/assign",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"reports",
+								"assign"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Put Reports Under Review",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"case_number_list\": []\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/admin/reports/review",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"reports",
+								"review"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Close Report",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"moderator_note\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/admin/reports/:case_number/close",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"reports",
+								":case_number",
+								"close"
+							],
+							"variable": [
+								{
+									"key": "case_number",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Report Action Auto",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"case_number\": 1,\n    \"reported_username\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/admin/reports/action/auto",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"reports",
+								"action",
+								"auto"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Report Action Manual",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"case_number\": 1,\n    \"reported_username\": \"\",\n    \"action\": \"\",\n    \"duration\": 24\n    // \"contents_to_be_banned\": []     // only for account report, put minimum of 3 post IDs\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/admin/reports/action/manual",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"reports",
+								"action",
+								"manual"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appeal Dashboard - Admin",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/appeals/admin-dashboard?type_=&status=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"appeals",
+								"admin-dashboard"
+							],
+							"query": [
+								{
+									"key": "type_",
+									"value": ""
+								},
+								{
+									"key": "status",
+									"value": ""
+								},
+								{
+									"key": "emp_id",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "reported_at",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appeal Dashboard",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/appeals/dashboard?status=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"appeals",
+								"dashboard"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Appeal",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/appeals/:case_number",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"appeals",
+								":case_number"
+							],
+							"variable": [
+								{
+									"key": "case_number",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Related Open Appeals",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/appeals/:case_number/related?admin=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"appeals",
+								":case_number",
+								"related"
+							],
+							"query": [
+								{
+									"key": "admin",
+									"value": ""
+								}
+							],
+							"variable": [
+								{
+									"key": "case_number",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Assign Appeals",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"case_number_list\": [],\n    \"moderator_emp_id\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/admin/appeals/assign",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"appeals",
+								"assign"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Put Appeals Under Review",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"case_number_list\": []\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/admin/appeals/review",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"appeals",
+								"review"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appeal Check Policy",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/appeals/:case_number/check-policy",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"appeals",
+								":case_number",
+								"check-policy"
+							],
+							"variable": [
+								{
+									"key": "case_number",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Close Appeal",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"moderator_note\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/admin/appeals/:case_number/close",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"appeals",
+								":case_number",
+								"close"
+							],
+							"variable": [
+								{
+									"key": "case_number",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Appeal Action",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"case_number\": 1,\n    \"action\": \"\",\n    \"appeal_username\": \"\",\n    \"moderator_note\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/admin/appeals/action",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"appeals",
+								"action"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Users",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/users?status=&sort=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"users"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": ""
+								},
+								{
+									"key": "sort",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/users/:username",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"users",
+								":username"
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Posts",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getPostsResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/users/:username/posts?status=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"users",
+								":username",
+								"posts"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": ""
+								}
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Posts Pagination",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const myPackage = pm.require('vpkonnect_scripts');",
+									"",
+									"let responseJson;",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    myPackage.getPostsResponse(responseJson);",
+									"} catch (e) {",
+									"    console.error('Error executing package function:', e);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {
+									"vpkonnect_scripts": {
+										"id": "01914fd4-3aae-7600-a06a-a1b89cb245d8"
+									}
+								}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/users/:username/posts?status=&last_post_id={{lastPostId}}",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"users",
+								":username",
+								"posts"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": ""
+								},
+								{
+									"key": "last_post_id",
+									"value": "{{lastPostId}}"
+								}
+							],
+							"variable": [
+								{
+									"key": "username",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Employees",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/employees?status=&type_=&level=&sort=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"employees"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": ""
+								},
+								{
+									"key": "type_",
+									"value": ""
+								},
+								{
+									"key": "level",
+									"value": ""
+								},
+								{
+									"key": "sort",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Post",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/posts/:post_id",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"posts",
+								":post_id"
+							],
+							"variable": [
+								{
+									"key": "post_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Comment",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/comments/:comment_id",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"comments",
+								":comment_id"
+							],
+							"variable": [
+								{
+									"key": "comment_id",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "App Activity Metrics",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"const jwt = pm.environment.get(\"JWT\");",
+									"",
+									"if (!jwt) {",
+									"    pm.request.headers.remove(\"Authorization\");",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"let responseJson;",
+									"",
+									"try {",
+									"    responseJson = pm.response.json();",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response:', e);",
+									"    return;",
+									"}",
+									"",
+									"if (pm.response.code === 200 && responseJson.hasOwnProperty('access_token')) {",
+									"    pm.environment.set('JWT', responseJson.access_token);",
+									"    console.log('Token refreshed. Re-send request.');",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{JWT}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{URL}}/admin/app-metrics?start_date=&end_date=",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"admin",
+								"app-metrics"
+							],
+							"query": [
+								{
+									"key": "start_date",
+									"value": ""
+								},
+								{
+									"key": "end_date",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Employee",
+			"item": [
+				{
+					"name": "Employee Register",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "first_name",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "last_name",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "personal_email",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "date_of_birth",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "gender",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "country_phone_code",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "phone_number",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "aadhaar",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "pan",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "address_line_1",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "address_line_2",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "city",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "state_province",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "zip_postal_code",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "country",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "work_email",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "join_date",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "type",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "designation",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "confirm_password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "image",
+									"value": "",
+									"type": "file"
+								},
+								{
+									"key": "supervisor",
+									"value": "",
+									"type": "text",
+									"disabled": true
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/employees/register",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"employees",
+								"register"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Employee Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"try {",
+									"    const jsonResponse = pm.response.json();",
+									"",
+									"    if (pm.response.code === 200) { ",
+									"        if (jsonResponse.access_token) {",
+									"            pm.environment.set(\"JWT\", jsonResponse.access_token);",
+									"        } else {",
+									"            console.warn('Access token not found in the response.');",
+									"        }",
+									"    } else {",
+									"        console.warn('Response code is not 200. Skipping processing.');",
+									"        return;",
+									"    }",
+									"} catch (e) {",
+									"    console.error('Failed to parse JSON response or response is not JSON:', e);",
+									"    return;",
+									"}",
+									"",
+									"try {",
+									"    var formData = pm.request.body.formdata;",
+									"    var employeeDeviceInfoValue = null;",
+									"",
+									"    if (formData) {",
+									"        formData.each(function(param) {",
+									"            if (param.key === 'employee_device_info') {",
+									"                employeeDeviceInfoValue = param.value;",
+									"                return false;",
+									"            }",
+									"        });",
+									"    } else {",
+									"        console.warn('Form data not found in the request.');",
+									"        return;",
+									"    }",
+									"",
+									"    if (employeeDeviceInfoValue !== null) {",
+									"        pm.environment.set(\"device_info\", employeeDeviceInfoValue);",
+									"    } else {",
+									"        console.warn('Employee device info not found in the form data.');",
+									"    }",
+									"} catch (e) {",
+									"    console.error('Failed to process form data:', e);",
+									"    return;",
+									"}",
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "username",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "",
+									"type": "text"
+								},
+								{
+									"key": "employee_device_info",
+									"value": "{{$randomUserAgent}}",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{URL}}/employees/login",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"employees",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Employee Logout",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code == 200){",
+									"    pm.environment.unset(\"JWT\");",
+									"    pm.environment.unset(\"device_info\")",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"emp_id\": \"\",\n    \"device_info\": \"{{device_info}}\",   // not required for action = all\n    \"action\": \"\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{URL}}/employees/logout",
+							"host": [
+								"{{URL}}"
+							],
+							"path": [
+								"employees",
+								"logout"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Root",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"try {",
+							"    const response = pm.response.json();",
+							"",
+							"    if (pm.response.code === 200) {",
+							"        if (response.access_token) {",
+							"            const access_token = response.access_token;",
+							"            pm.environment.set(\"JWT\", access_token);",
+							"",
+							"            const authHeader = `Bearer ${access_token}`;",
+							"            console.log('Authorization Header:', authHeader);",
+							"",
+							"            const feed_url = 'http://127.0.0.1:8000/api/v0/users/feed';",
+							"            const requestData = {",
+							"                url: feed_url,",
+							"                method: 'GET',",
+							"                header: {",
+							"                    'Authorization': authHeader,",
+							"                    'Content-Type': 'application/json'",
+							"                }",
+							"            };",
+							"",
+							"            pm.sendRequest(requestData, function(err, res) {",
+							"                if (err) {",
+							"                    console.error(\"Error fetching feed:\", err);",
+							"                } else {",
+							"                    try {",
+							"                        const output = res.json();",
+							"                        console.log(output);",
+							"                    } catch (e) {",
+							"                        console.error(\"Failed to parse feed response JSON:\", e);",
+							"                        console.log(\"Raw feed response:\", res.text());",
+							"                    }",
+							"                }",
+							"            });",
+							"        } else {",
+							"            if (Object.keys(response).length > 0) {",
+							"                console.log(\"Other Response:\", response);",
+							"            } else {",
+							"                console.log(\"Error: No access token received.\");",
+							"            }",
+							"        }",
+							"    } else {",
+							"        const error_detail = {",
+							"            status: `${pm.response.code} ${pm.response.status}`,",
+							"            detail: response.detail || 'No detail provided.'",
+							"        };",
+							"        console.log(\"Error:\", error_detail);",
+							"    }",
+							"} catch (e) {",
+							"    console.error(\"An error occurred while handling the response:\", e);",
+							"    console.log(\"Raw response:\", pm.response.text());",
+							"}",
+							""
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"if (pm.environment.has('JWT')) {",
+							"    // If defined, set the value of the Authorization header",
+							"    pm.request.headers.add({",
+							"        key: 'Authorization',",
+							"        value: 'Bearer ' + pm.environment.get('JWT')",
+							"    });",
+							"}"
+						],
+						"type": "text/javascript",
+						"packages": {}
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{URL}}/",
+					"host": [
+						"{{URL}}"
+					],
+					"path": [
+						""
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

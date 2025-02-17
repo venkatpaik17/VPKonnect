@@ -54,7 +54,7 @@ class UserRegister(UserBase):
     confirm_password: str
     date_of_birth: date
     gender: Literal["M", "F", "N", "O"]
-    country: str | None
+    country: str | None = Field(None, min_length=3, max_length=3)
     account_visibility: Literal["PBC", "PRV"] | None
     bio: str | None = Field(None, max_length=150)
     country_phone_code: str | None = Field(None, min_length=1, max_length=10)
@@ -210,7 +210,7 @@ class UserDeactivationDeletion(BaseModel):
 
 class UserSendVerifyEmail(BaseModel):
     email: EmailStr
-    type: str
+    type: Literal["USV", "PWR"]
 
 
 class UserContentReport(BaseModel):

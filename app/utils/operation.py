@@ -437,10 +437,8 @@ def operations_after_appeal_accept(
     consecutive_violation = None
 
     if appeal_content_type == "account":
-        print("Account")
         # Appeal type: account, Report type: account
         if restrict_ban_content_type == "account":
-            print("Account-Account")
             # fetch the flagged posts from account_report_flagged_content, get all or partial no of posts which are banned, change the status from BAN to PUB
             # adjust the scores in guideline violation score table, fetch last added score from guideline violation last added score table and update is_removed to true
             # revoke the active restrict/ban, activate consecutive violation if any (set enforce_action_at with func.now() and is_enforce_action_early as True), update user status

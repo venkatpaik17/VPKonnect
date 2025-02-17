@@ -329,16 +329,6 @@ def refresh_token_user(
     return response
 
 
-# dummy route to test token rotation
-@router.get(settings.api_prefix + "/users/dummy")
-def dummy_user(
-    user: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["user"])
-    ),
-):
-    return {"message": f"checking token rotation {user.email}"}
-
-
 # user logout
 @router.post(settings.api_prefix + "/users/logout")
 def user_logout(
@@ -798,7 +788,7 @@ def employee_logout(
     all_refresh_token_ids = []
     try:
         if logout_employee.action == "one":
-            # fetch the active user session entry query
+            # fetch the active employee session entry query
             employee_logout_one_query = (
                 employee_service.get_employee_session_one_entry_query(
                     employee_id=str(employee.id),
@@ -814,13 +804,13 @@ def employee_logout(
                     detail="Employee Login/Session entry not found",
                 )
 
-            # update is_active in user session entry
+            # update is_active in employee session entry
             employee_logout_one_query.update(
                 {"is_active": False}, synchronize_session=False
             )
 
         elif logout_employee.action == "all":
-            # get all user auth entries based on user id
+            # get all employee auth entries based on user id
             employee_auth_track_entries = (
                 auth_service.get_all_employee_auth_track_entries_by_employee_id(
                     employee_id=str(employee.id), status="ACT", db_session=db
@@ -849,7 +839,7 @@ def employee_logout(
                     detail="Employee Login/Session entries not found",
                 )
 
-            # update is_active in user session entries
+            # update is_active in employee session entries
             employee_logout_all_query.update(
                 {"is_active": False}, synchronize_session=False
             )
@@ -892,13 +882,3 @@ def employee_logout(
         print(f"Key: {key}, Value: {value}")
 
     return response
-
-
-# dummy route to test token rotation
-@router.get(settings.api_prefix + "/employees/dummy")
-def dummy_emp(
-    employee: auth_schema.AccessTokenPayload = Depends(
-        auth_utils.AccessRoleDependency(role=["employee"])
-    ),
-):
-    return {"message": f"checking token rotation {employee.email}"}

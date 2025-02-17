@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:12.19
+    image: venkatpaik17/postgres:12.19
     environment:
       POSTGRES_USER: ${DATABASE_USERNAME}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
