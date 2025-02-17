@@ -508,7 +508,7 @@ Open pgAdmin 4 -> Servers -> Register. Add details and connect to database
 
 > [!NOTE] 
 > 1. Read [Project Notes](#project-notes)
-> 2. Refer [Full API Documentation (Redoc)](https://a.com)
+> 2. Refer [Full API Documentation (Redoc)](https://venkatpaik17.github.io/VPKonnect/)
 > 3. Refer [schemas](app/schemas/), [enum.py](app/utils/enum.py), and [map.py](app/utils/map.py) for certain column attributes and other route parameters.  
 > 4. Refer [init_function.sql](app/init_sql/init_function.sql), and [function_trigger.sql](app/sql/function_trigger.sql) for sql functions and triggers.  
 > 5. While testing APIs in Postman, you can monitor the execution of pre-request and post-response scripts using the *Console* located at the bottom-left of the Postman app.
@@ -862,7 +862,7 @@ username_change_history:
 
 - **API Documentation** 
 
-  *(Add link)*
+  [Get Resports Dashboard Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_reports_dashboard_api_v0_admin_reports_dashboard_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -920,7 +920,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Reports Admin Dashboard Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_reports_admin_dashboard_api_v0_admin_reports_admin_dashboard_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -974,7 +974,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Requested Report Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_requested_report_api_v0_admin_reports__case_number__get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -1035,7 +1035,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get All Related Open Reports For Specific Report Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_all_related_open_reports_for_specific_report_api_v0_admin_reports__case_number__related_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -1100,7 +1100,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Selected Reports Under Review Update Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/selected_reports_under_review_update_api_v0_admin_reports_review_patch)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_report_detail`, `user_content_report_event_timeline` 
@@ -1167,7 +1167,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Selected Reports Assign Update Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/selected_reports_assign_update_api_v0_admin_reports_assign_patch)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_report_detail` 
@@ -1238,7 +1238,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Close Report Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/close_report_api_v0_admin_reports__case_number__close_patch)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_report_detail`, `user_content_report_event_timeline` 
@@ -1388,7 +1388,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Enforce Report Action Auto Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/enforce_report_action_auto_api_v0_admin_reports_action_auto_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_report_detail`, `user_content_report_event_timeline`, `user_restrict_ban_detail`, `guideline_violation_score`, `guideline_violation_last_added_score`, `post`, `comment`, `user`, `activity_detail`, `user_account_history`, `post_like`, `comment_like`, `user_follow_association`, `user_session`, `user_auth_track` 
@@ -1531,7 +1531,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Enforce Report Action Manual Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/enforce_report_action_manual_api_v0_admin_reports_action_manual_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_report_detail`, `user_content_report_event_timeline`, `user_restrict_ban_detail`, `account_report_flagged_content`, `post`, `comment`, `guideline_violation_score`, `guideline_violation_last_added_score`, `user`, `activity_detail`, `user_account_history`, `post_like`, `comment_like`, `user_follow_association`, `user_session`, `user_auth_track` 
@@ -1590,7 +1590,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Appeals Admin Dashboard Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_appeals_admin_dashboard_api_v0_admin_appeals_admin_dashboard_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -1644,7 +1644,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Appeals Dashboard Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_appeals_dashboard_api_v0_admin_appeals_dashboard_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -1693,7 +1693,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Requested Appeal Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_requested_appeal_api_v0_admin_appeals__case_number__get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -1754,7 +1754,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get All Related Open Appeals For Specific Appeal Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_all_related_open_appeals_for_specific_appeal_api_v0_admin_appeals__case_number__related_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -1819,7 +1819,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Selected Appeals Under Review Update Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/selected_appeals_under_review_update_api_v0_admin_appeals_review_patch)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_restrict_ban_appeal_detail`, `user_content_restrict_ban_appeal_event_timeline`
@@ -1886,7 +1886,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Selected Appeals Assign Update Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/selected_appeals_assign_update_api_v0_admin_appeals_assign_patch)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_restrict_ban_appeal_detail`
@@ -1976,7 +1976,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Check Appeal Policy Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/check_appeal_policy_api_v0_admin_appeals__case_number__check_policy_patch)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_restrict_ban_appeal_detail`
@@ -2047,7 +2047,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Close Appeal Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/close_appeal_api_v0_admin_appeals__case_number__close_patch)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_restrict_ban_appeal_detail`, `user_content_restrict_ban_appeal_event_timeline`
@@ -2143,7 +2143,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Appeal Action Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/appeal_action_api_v0_admin_appeals_action_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_restrict_ban_appeal_detail`, `user_content_restrict_ban_appeal_event_timeline`, `post`, `comment`, `guideline_violation_last_added_score`, `guideline_violation_score`, `user_restrict_ban_detail`, `user_content_report_detail`, `user_content_report_event_timeline`, `user`, `activity_detail`, `user_account_history`, `post_like`, `comment_like`, `user_follow_association`, `user_session`, `user_auth_track`  
@@ -2193,7 +2193,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Users Admin Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_users_api_v0_admin_users_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -2244,7 +2244,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [User Profile Details Admin Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/user_profile_details_api_v0_admin_users__username__get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -2300,7 +2300,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get All User Posts Admin Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_all_user_posts_api_v0_admin_users__username__posts_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -2352,7 +2352,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Employees Admin Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_employees_api_v0_admin_employees_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -2401,7 +2401,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Post Admin Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_post_api_v0_admin_posts__post_id__get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -2450,7 +2450,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Comment Admin Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/get_comment_api_v0_admin_comments__comment_id__get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -2519,7 +2519,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [App Activity Metrics Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Admin/operation/app_activity_metrics_api_v0_admin_app_metrics_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -2606,7 +2606,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [User Login Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Authentication/operation/user_login_api_v0_users_login_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user`, `user_session`, `user_auth_track`, `activity_detail`, `user_account_history`, `post`, `comment`, `post_like`, `comment_like`, `user_follow_association`  
@@ -2689,7 +2689,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Refresh Token User Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Authentication/operation/refresh_token_user_api_v0_users_token_refresh_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_auth_track`  
@@ -2763,7 +2763,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [User Logout Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Authentication/operation/user_logout_api_v0_users_logout_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_session`, `user_auth_track`  
@@ -2828,7 +2828,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Employee Login Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Authentication/operation/employee_login_api_v0_employees_login_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `employee_session`, `employee_auth_track`  
@@ -2909,7 +2909,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Refresh Token Employee Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Authentication/operation/refresh_token_employee_api_v0_employees_token_refresh_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `employee_auth_track`  
@@ -2978,7 +2978,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Employee Logout Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Authentication/operation/employee_logout_api_v0_employees_logout_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `employee_session`, `employee_auth_track`  
@@ -3044,7 +3044,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Edit Comment Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Comments/operation/edit_comment_api_v0_comments__comment_id__put)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `comment`    
@@ -3118,7 +3118,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Remove Comment Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Comments/operation/remove_comment_api_v0_comments__comment_id__delete)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `comment`, `comment_like`  
@@ -3184,7 +3184,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Like Unlike Comment Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Comments/operation/like_unlike_comment_api_v0_comments__comment_id__like_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `comment_like`  
@@ -3246,7 +3246,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Comment Like Users Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Comments/operation/get_comment_like_users_api_v0_comments__comment_id__like_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -3323,7 +3323,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Create Employee Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Employees/operation/create_employee_api_v0_employees_register_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `employee`  
@@ -3386,7 +3386,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Create Post Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Posts/operation/create_post_api_v0_posts__post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `post`
@@ -3457,7 +3457,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Post Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Posts/operation/get_post_api_v0_posts__post_id__get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -3548,7 +3548,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Edit Post Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Posts/operation/edit_post_api_v0_posts__post_id__put)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `post`  
@@ -3619,7 +3619,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Remove Post Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Posts/operation/remove_post_api_v0_posts__post_id__delete)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `post`, `post_like`, `comment`, `comment_like`
@@ -3685,7 +3685,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Like Unlike Post Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Posts/operation/like_unlike_post_api_v0_posts__post_id__like_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `post_like`    
@@ -3747,7 +3747,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Post Like Users Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Posts/operation/get_post_like_users_api_v0_posts__post_id__like_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -3810,7 +3810,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Create Comment Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Posts/operation/create_comment_api_v0_posts__post_id__comments_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `comment`  
@@ -3879,7 +3879,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get All Comments Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Posts/operation/get_all_comments_api_v0_posts__post_id__comments_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -3974,7 +3974,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Create User Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/create_user_api_v0_users_register_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user`, `user_verification_code_token`, `activity_detail`  
@@ -4041,7 +4041,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Send Verification Mail Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/send_verification_email_user_api_v0_users_send_verify_email_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_verification_code_token`  
@@ -4099,7 +4099,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Verify User Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/verify_user__api_v0_users_register_verify_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_verification_code_token`, `user`, `guideline_violation_score`, `activity_detail`, `user_account_history`  
@@ -4158,7 +4158,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Reset Password Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/reset_password_api_v0_users_password_reset_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_verification_code_token`  
@@ -4223,7 +4223,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Change Password - Reset Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/change_password_reset_api_v0_users_password_change_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_verification_code_token`, `user`, `password_change_history`  
@@ -4287,7 +4287,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Change Password - Update Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/change_password_update_api_v0_users_password_update_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user`, `password_change_history`, `user_session`, `user_auth_track`  
@@ -4365,7 +4365,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Follow User Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/follow_user_api_v0_users_follow_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_follow_association`  
@@ -4431,7 +4431,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Manage Follow Request Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/manage_follow_request_api_v0_users_follow_requests__username__put)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_follow_association`  
@@ -4510,7 +4510,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get User Followers Following Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/get_user_followers_following_api_v0_users__username__follow_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -4563,7 +4563,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get Follow Requests Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/get_follow_requests_api_v0_users_follow_requests_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -4622,7 +4622,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Remove Follower Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/remove_follower_api_v0_users_follow_remove__username__put)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_follow_association`  
@@ -4679,7 +4679,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Username Change Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/username_change_api_v0_users_username_change_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user`, `username_change_history`  
@@ -4739,7 +4739,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get User Profile Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/user_profile_api_v0_users__username__profile_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -4810,7 +4810,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get All User Posts Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/get_all_user_posts_api_v0_users__username__posts_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -4874,7 +4874,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [User Feed Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/user_feed_api_v0_users_feed_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -4942,7 +4942,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Deactivate or Soft Delete User Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/deactivate_or_soft_delete_user_api_v0_users_deactivate_patch)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user`, `activity_detail`, `user_account_history`, `user_session`, `user_auth_track`, `post`, `comment`, `post_like`, `comment_like`, `user_follow_association`  
@@ -5028,7 +5028,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Report Item Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/report_item_api_v0_users_report_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_content_report_detail`, `user_content_report_event_timeline`  
@@ -5108,7 +5108,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Appeal Content Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/appeal_content_api_v0_users_appeal_post)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user`, `user_content_restrict_ban_appeal_detail`, `activity_detail`, `user_account_history`, `user_content_restrict_ban_appeal_event_timeline`, `post`, `comment`, `post_like`, `comment_like`, `user_follow_association`  
@@ -5143,7 +5143,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Send Ban Mail Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/send_ban_mail_api_v0_users_send_ban_mail_post)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -5177,7 +5177,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Send Delete Mail Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/send_delete_mail_api_v0_users_send_delete_mail_post)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -5229,7 +5229,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Get User Violation Status Details Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/get_user_violation_status_details_api_v0_users_violation_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -5283,7 +5283,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [About User Doc](https://venkatpaik17.github.io/VPKonnect/#tag/Users/operation/about_user_api_v0_users__username__about_get)
 
 - **Database Tables Affected and Triggers involved** 
 
@@ -6057,7 +6057,7 @@ username_change_history:
 
 - **API Documentation** 
 
-   *(Add link)*
+   [Root Doc](https://venkatpaik17.github.io/VPKonnect/#operation/root_api_v0__get)
 
 - **Database Tables Affected and Triggers involved** 
   - **Tables**: `user_auth_track`, `employee_auth_track`  
