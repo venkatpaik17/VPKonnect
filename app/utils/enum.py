@@ -1,4 +1,7 @@
 # not used
+# Representation purposes only
+# These are the accepted attributes values
+
 from enum import Enum
 
 
