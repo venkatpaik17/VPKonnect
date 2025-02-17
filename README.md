@@ -383,6 +383,11 @@ VPKonnect
   - [Mac Install Guide](https://docs.docker.com/desktop/setup/install/mac-install/) <br>
 
 ### Clone the Project Repository
+
+> [!IMPORTANT]
+>- For Windows users, executing files may cause issues with line endings, as Windows uses **CRLF**, while Docker, being Linux-based, expects **LF**. This mismatch can lead to errors. To avoid this, make sure your files use **LF**    line endings. You can adjust this setting in your code editor to prevent such issues.  
+>- If you use VSCode, Go to Settings -> Search for *Files: Eol* -> Set it to **\n (LF)**.
+
 ```sh
 git clone https://github.com/venkatpaik17/VPKonnect.git
 cd VPKonnect/
@@ -403,7 +408,7 @@ cd VPKonnect/
          DATABASE_USERNAME=<db_username>
          DATABASE_PASSWORD=<db_password>
          DATABASE_NAME=<db_name>
-         DATABASE_HOSTNAME=localhost
+         DATABASE_HOSTNAME=db    # postgres db service name in docker-compose.yml
          DATABASE_PORT=5432
          ALLOWED_CORS_ORIGIN=http://localhost:8000,http://127.0.0.1:8000
          ACCESS_TOKEN_SECRET_KEY=<secret_key>
@@ -497,6 +502,7 @@ docker exec -it <container-name> /bin/bash
   7. Go to **Scripts** tab, on the right side, click on **Open package library**.
   8. Click on **New Package** to create a package, name it `vpkonnect_scripts`.
   9. Copy the JS code from [package.js](./Postman/package.js) to `vpkonnect_scripts` package and Save.
+  10. Click the **No environment** dropdown on top-right side of the app screen and select **VPKonnect** from the list.
 
 ### Install a Database Management Tool
 - **pgAdmin 4:** [Download](https://www.pgadmin.org/download/)  
