@@ -328,6 +328,10 @@ VPKonnect
 ├── images
 │   ├── employee
 │   └── user
+├── Postman
+|   ├── package.js
+|   ├── VPKonnect.postman_collection.json
+|   └── VPKonnect.postman_environment.json
 ├── tests
 │   ├── test_v0_endpoints
 │   │   └── __init__.py
@@ -335,6 +339,7 @@ VPKonnect
 ├── .app.env
 ├── .dockerignore
 ├── .env
+├── .gitattributes
 ├── .gitignore
 ├── alembic.ini
 ├── docker-compose.yml
@@ -348,6 +353,7 @@ VPKonnect
 ### Some File Descriptions
 
 - **`app/init_sql/init_function.sql`** – Contains SQL functions and plugins setup required for future database operations.  
+- **`package.js`** - Custom package library for some Postman operations.  
 - **`.app.env`** – Defines environment variables specifically for application settings.  
 - **`.env`** – Stores environment variables for Docker Compose configurations.  
 - **`entrypoint.sh`** – Executes necessary operations before starting the application, including:  
