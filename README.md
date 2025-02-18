@@ -384,12 +384,14 @@ VPKonnect
 
 ### Clone the Project Repository
 
-> [!IMPORTANT]
->- For Windows users, executing files may cause issues with line endings, as Windows uses **CRLF**, while Docker, being Linux-based, expects **LF**. This mismatch can lead to errors. To avoid this, make sure your files use **LF**    line endings. You can adjust this setting in your code editor to prevent such issues.  
->- If you use VSCode, Go to Settings -> Search for *Files: Eol* -> Set it to **\n (LF)**.
+>[!NOTE]
+> Remove the **dummy.txt** files from `./images/user/`, `./images/employee/`, and `./app/logs/`
 
 ```sh
-git clone https://github.com/venkatpaik17/VPKonnect.git
+# choose any one
+git clone https://github.com/venkatpaik17/VPKonnect.git     # clone over HTTPS
+git clone git@github.com:venkatpaik17/VPKonnect.git      # clone over SSH
+
 cd VPKonnect/
 ```
 
@@ -443,7 +445,7 @@ cd VPKonnect/
 
 ### Run the Application
 ```sh
-docker-compose up -d
+docker compose up -d
 ```
 - `-d`: Runs in detached mode (background)
 
@@ -457,23 +459,23 @@ docker-compose up -d
 
 ```sh
 # View Running Containers
-docker-compose ps -a
+docker compose ps -a
 
 # Stop Services
-docker-compose stop
+docker compose stop
 
 # Restart Services
-docker-compose restart
+docker compose restart
 
 # Shut Down and Remove Containers/Volumes
-docker-compose down -v
+docker compose down -v
 
 # View Logs
-docker-compose logs -f    # Logs for all services
-docker-compose logs <service-name> -f  # Logs for a specific service
+docker compose logs -f    # Logs for all services
+docker compose logs <service-name> -f  # Logs for a specific service
 
 # Access Running Containers
-docker-compose exec <service-name> /bin/bash
+docker compose exec <service-name> /bin/bash
 docker exec -it <container-name> /bin/bash
 ```
 
