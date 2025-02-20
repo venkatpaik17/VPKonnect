@@ -143,7 +143,7 @@
   - [Libraries \& Tools](#libraries--tools)
   - [Official Documentation \& Learning Resources](#official-documentation--learning-resources)
   - [General Resources \& Community Help](#general-resources--community-help)
-- [Feedback and Suggestions](#feedback-and-suggestions)
+- [Feedback, Suggestions And Issues](#feedback-suggestions-and-issues)
 
 
 ## Introduction
@@ -6350,6 +6350,8 @@ Despite all the ups and downs, it was a valuable experience. I gained confidence
 
 ---
 
-## Feedback and Suggestions
+## Feedback, Suggestions And Issues
 
-*(Encourage feedback and contributions)*
+**We value your feedback and suggestions. You can report issues, request changes to the project's functionality, or share resources and experiences to support learning.**  
+
+[Submit Link](https://forms.gle/ta9XL23L26dVFfS19)
